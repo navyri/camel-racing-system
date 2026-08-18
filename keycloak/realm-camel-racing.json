@@ -1,0 +1,107 @@
+{
+    "realm": "camel-racing",
+    "enabled": true,
+    "accessTokenLifespan": 1800,
+    "ssoSessionIdleTimeout": 3600,
+    "roles": {
+        "realm": [
+            {
+                "name": "ADMINISTRATOR",
+                "description": "Full system administration access"
+            },
+            {
+                "name": "RACE_ORGANIZER",
+                "description": "Race, registration and result management access"
+            },
+            {
+                "name": "VIEWER",
+                "description": "Read-only access"
+            }
+        ]
+    },
+    "clients": [
+        {
+            "clientId": "camel-racing-swagger",
+            "name": "Camel Racing Swagger",
+            "enabled": true,
+            "protocol": "openid-connect",
+            "publicClient": true,
+            "standardFlowEnabled": true,
+            "directAccessGrantsEnabled": true,
+            "serviceAccountsEnabled": false,
+            "redirectUris": [
+                "http://localhost:8080/*",
+                "http://localhost:8081/*"
+            ],
+            "webOrigins": [
+                "http://localhost:8080",
+                "http://localhost:8081"
+            ],
+            "attributes": {
+                "pkce.code.challenge.method": "S256"
+            },
+            "defaultClientScopes": [
+                "web-origins",
+                "profile",
+                "roles",
+                "email"
+            ]
+        }
+    ],
+    "users": [
+        {
+            "username": "admin",
+            "enabled": true,
+            "emailVerified": true,
+            "firstName": "Academic",
+            "lastName": "Administrator",
+            "email": "admin@camel-racing.test",
+            "credentials": [
+                {
+                    "type": "password",
+                    "value": "AdminCamel2026",
+                    "temporary": false
+                }
+            ],
+            "realmRoles": [
+                "ADMINISTRATOR"
+            ]
+        },
+        {
+            "username": "organizer",
+            "enabled": true,
+            "emailVerified": true,
+            "firstName": "Race",
+            "lastName": "Organizer",
+            "email": "organizer@camel-racing.test",
+            "credentials": [
+                {
+                    "type": "password",
+                    "value": "OrganizerCamel2026",
+                    "temporary": false
+                }
+            ],
+            "realmRoles": [
+                "RACE_ORGANIZER"
+            ]
+        },
+        {
+            "username": "viewer",
+            "enabled": true,
+            "emailVerified": true,
+            "firstName": "Academic",
+            "lastName": "Viewer",
+            "email": "viewer@camel-racing.test",
+            "credentials": [
+                {
+                    "type": "password",
+                    "value": "ViewerCamel2026",
+                    "temporary": false
+                }
+            ],
+            "realmRoles": [
+                "VIEWER"
+            ]
+        }
+    ]
+}
