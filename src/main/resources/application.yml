@@ -31,6 +31,8 @@ springdoc:
 app:
   security:
     keycloak-public-url: ${KEYCLOAK_PUBLIC_URL:http://localhost:8180}
+  teams:
+    max-members: 5
 
 management:
   endpoints:
