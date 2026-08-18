@@ -7,7 +7,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
-@Profile("dev")
+@Profile({ "dev", "docker" })
 public class TemporarySecurityConfig {
 
         @Bean
@@ -18,7 +18,7 @@ public class TemporarySecurityConfig {
                                                 .frameOptions(frameOptions -> frameOptions.sameOrigin()))
                                 .authorizeHttpRequests(authorize -> authorize
                                                 .requestMatchers(
-                                                                "/api/health",
+                                                                "/actuator/health",
                                                                 "/h2-console/**",
                                                                 "/swagger-ui.html",
                                                                 "/swagger-ui/**",

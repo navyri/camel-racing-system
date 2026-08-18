@@ -15,7 +15,7 @@ spring:
           fail_on_pagination_over_collection_fetch: true
 
 server:
-  port: ${SERVER_PORT:8080}
+  port: "${SERVER_PORT:8080}"
 
 springdoc:
   api-docs:
@@ -30,5 +30,11 @@ springdoc:
       client-id: camel-racing-swagger
       use-pkce-with-authorization-code-grant: true
 
-keycloak:
-  public-url: ${KEYCLOAK_PUBLIC_URL:http://localhost:8180}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
