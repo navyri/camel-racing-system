@@ -35,6 +35,14 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/error"
                         ).permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/competitors/**")
+                        .hasAnyRole("ADMINISTRATOR", "RACE_ORGANIZER", "VIEWER")
+                        .requestMatchers("/api/competitors/**")
+                        .hasRole("ADMINISTRATOR")
+                        .requestMatchers(HttpMethod.GET, "/api/teams/**")
+                        .hasAnyRole("ADMINISTRATOR", "RACE_ORGANIZER", "VIEWER")
+                        .requestMatchers("/api/teams/**")
+                        .hasRole("ADMINISTRATOR")
                         .requestMatchers(HttpMethod.GET, "/api/**")
                         .hasAnyRole("ADMINISTRATOR", "RACE_ORGANIZER", "VIEWER")
                         .anyRequest().authenticated()
@@ -68,9 +76,9 @@ public class SecurityConfig {
 
             return roles.stream()
                     .filter(role -> role != null)
-                    .map(role -> String.valueOf(role))
+                    .map(String::valueOf)
                     .map(role -> new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
-                    .map(authority -> (GrantedAuthority) authority)
+                    .map(GrantedAuthority.class::cast)
                     .toList();
         }
     }
