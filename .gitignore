@@ -1,0 +1,17 @@
+.gradle/
+build/
+out/
+
+.idea/
+*.iml
+.vscode/
+
+.env
+.env.*
+!.env.template
+
+*.log
+.DS_Store
+
+application-local.yml
+application-prod.yml
