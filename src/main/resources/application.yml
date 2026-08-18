@@ -1,10 +1,8 @@
 spring:
   application:
     name: camel-racing-system
-
   profiles:
     active: dev
-
   jpa:
     open-in-view: false
     defer-datasource-initialization: true
@@ -15,7 +13,7 @@ spring:
           fail_on_pagination_over_collection_fetch: true
 
 server:
-  port: "${SERVER_PORT:8080}"
+  port: ${SERVER_PORT:8080}
 
 springdoc:
   api-docs:
@@ -29,6 +27,10 @@ springdoc:
     oauth:
       client-id: camel-racing-swagger
       use-pkce-with-authorization-code-grant: true
+
+app:
+  security:
+    keycloak-public-url: ${KEYCLOAK_PUBLIC_URL:http://localhost:8180}
 
 management:
   endpoints:
