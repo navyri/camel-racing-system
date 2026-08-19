@@ -7,8 +7,10 @@ import java.util.NoSuchElementException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -65,6 +67,18 @@ public class GlobalExceptionHandler {
                                 validationErrors));
         }
 
+        @ExceptionHandler(HttpMessageNotReadableException.class)
+        public ResponseEntity<ErrorResponse> handleHttpMessageNotReadableException(
+                        HttpMessageNotReadableException exception,
+                        HttpServletRequest request) {
+                return ResponseEntity.badRequest().body(new ErrorResponse(
+                                LocalDateTime.now(),
+                                HttpStatus.BAD_REQUEST.value(),
+                                HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                                "Request body contains invalid or unsupported values",
+                                request.getRequestURI()));
+        }
+
         @ExceptionHandler(ConflictException.class)
         public ResponseEntity<ErrorResponse> handleConflictException(
                         ConflictException exception,
@@ -74,6 +88,18 @@ public class GlobalExceptionHandler {
                                 HttpStatus.CONFLICT.value(),
                                 HttpStatus.CONFLICT.getReasonPhrase(),
                                 exception.getMessage(),
+                                request.getRequestURI()));
+        }
+
+        @ExceptionHandler(DataIntegrityViolationException.class)
+        public ResponseEntity<ErrorResponse> handleDataIntegrityViolationException(
+                        DataIntegrityViolationException exception,
+                        HttpServletRequest request) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(
+                                LocalDateTime.now(),
+                                HttpStatus.CONFLICT.value(),
+                                HttpStatus.CONFLICT.getReasonPhrase(),
+                                "The operation violates a data integrity constraint",
                                 request.getRequestURI()));
         }
 
@@ -106,6 +132,18 @@ public class GlobalExceptionHandler {
                                 HttpStatus.BAD_REQUEST.value(),
                                 HttpStatus.BAD_REQUEST.getReasonPhrase(),
                                 message,
+                                request.getRequestURI()));
+        }
+
+        @ExceptionHandler(IllegalStateException.class)
+        public ResponseEntity<ErrorResponse> handleIllegalStateException(
+                        IllegalStateException exception,
+                        HttpServletRequest request) {
+                return ResponseEntity.badRequest().body(new ErrorResponse(
+                                LocalDateTime.now(),
+                                HttpStatus.BAD_REQUEST.value(),
+                                HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                                "Authenticated user data is incomplete",
                                 request.getRequestURI()));
         }
 }
