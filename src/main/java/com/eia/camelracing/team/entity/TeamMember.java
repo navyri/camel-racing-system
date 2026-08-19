@@ -23,15 +23,9 @@ import lombok.Setter;
 import lombok.ToString;
 
 @Entity
-@Table(
-        name = "team_members",
-        uniqueConstraints = {
-                @UniqueConstraint(
-                        name = "uk_team_member_team_competitor",
-                        columnNames = {"team_id", "competitor_id"}
-                )
-        }
-)
+@Table(name = "team_members", uniqueConstraints = {
+                @UniqueConstraint(name = "uk_team_member_team_competitor", columnNames = { "team_id", "competitor_id" })
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -40,27 +34,27 @@ import lombok.ToString;
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class TeamMember {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @EqualsAndHashCode.Include
-    private UUID id;
+        @Id
+        @GeneratedValue(strategy = GenerationType.UUID)
+        @EqualsAndHashCode.Include
+        private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "team_id", nullable = false)
-    @ToString.Exclude
-    private Team team;
+        @ManyToOne(fetch = FetchType.LAZY, optional = false)
+        @JoinColumn(name = "team_id", nullable = false)
+        @ToString.Exclude
+        private Team team;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "competitor_id", nullable = false)
-    @ToString.Exclude
-    private Competitor competitor;
+        @ManyToOne(fetch = FetchType.LAZY, optional = false)
+        @JoinColumn(name = "competitor_id", nullable = false)
+        @ToString.Exclude
+        private Competitor competitor;
 
-    @Column(name = "joined_at", nullable = false, updatable = false)
-    private LocalDateTime joinedAt;
+        @Column(name = "joined_at", nullable = false, updatable = false)
+        private LocalDateTime joinedAt;
 
-    @Column(name = "left_at")
-    private LocalDateTime leftAt;
+        @Column(name = "left_at")
+        private LocalDateTime leftAt;
 
-    @Column(name = "active", nullable = false)
-    private boolean active;
+        @Column(name = "active", nullable = false)
+        private boolean active;
 }
