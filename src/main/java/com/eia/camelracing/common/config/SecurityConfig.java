@@ -33,8 +33,8 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**",
-                                "/error"
-                        ).permitAll()
+                                "/error")
+                        .permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/competitors/**")
                         .hasAnyRole("ADMINISTRATOR", "RACE_ORGANIZER", "VIEWER")
                         .requestMatchers("/api/competitors/**")
@@ -59,16 +59,18 @@ public class SecurityConfig {
                         .hasAnyRole("ADMINISTRATOR", "RACE_ORGANIZER", "VIEWER")
                         .requestMatchers("/api/results/**")
                         .hasAnyRole("ADMINISTRATOR", "RACE_ORGANIZER")
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/standings",
+                                "/api/standings/**")
+                        .hasAnyRole("ADMINISTRATOR", "RACE_ORGANIZER", "VIEWER")
                         .requestMatchers(HttpMethod.GET, "/api/**")
                         .hasAnyRole("ADMINISTRATOR", "RACE_ORGANIZER", "VIEWER")
-                        .anyRequest().authenticated()
-                )
+                        .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
-                )
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
                 .headers(headers -> headers
-                        .frameOptions(frameOptions -> frameOptions.sameOrigin())
-                );
+                        .frameOptions(frameOptions -> frameOptions.sameOrigin()));
 
         return http.build();
     }
