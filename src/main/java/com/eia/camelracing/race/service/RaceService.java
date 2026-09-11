@@ -17,6 +17,8 @@ import com.eia.camelracing.race.entity.RaceStatus;
 import com.eia.camelracing.race.entity.RaceType;
 import com.eia.camelracing.race.mapper.RaceMapper;
 import com.eia.camelracing.race.repository.RaceRepository;
+import com.eia.camelracing.result.entity.ResultStatus;
+import com.eia.camelracing.result.repository.RaceResultRepository;
 import com.eia.camelracing.user.entity.User;
 
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class RaceService {
 
+    private static final int WINNER_POSITION = 1;
+
     private static final int DEFAULT_PAGE = 0;
     private static final int DEFAULT_SIZE = 10;
     private static final int MAX_SIZE = 100;
@@ -42,10 +46,10 @@ public class RaceService {
             "registrationDeadline",
             "createdAt",
             "updatedAt",
-            "maxParticipants"
-    );
+            "maxParticipants");
 
     private final RaceRepository raceRepository;
+    private final RaceResultRepository resultRepository;
     private final CurrentUserService currentUserService;
 
     @Transactional
@@ -68,16 +72,14 @@ public class RaceService {
             String search,
             Integer page,
             Integer size,
-            String sort
-    ) {
+            String sort) {
         Pageable pageable = buildPageable(page, size, sort);
 
         Page<RaceResponse> races = raceRepository.findAllByFilters(
                 status,
                 raceType,
                 normalizeFilter(search),
-                pageable
-        ).map(RaceMapper::toResponse);
+                pageable).map(RaceMapper::toResponse);
 
         return PageResponse.from(races);
     }
@@ -106,6 +108,16 @@ public class RaceService {
         Race race = findRaceById(id);
 
         validateStatusTransition(race.getStatus(), request.status());
+
+        if (race.getStatus() == RaceStatus.IN_PROGRESS
+                && request.status() == RaceStatus.COMPLETED
+                && !resultRepository.existsOfficialWinnerByRaceId(
+                        race.getId(),
+                        ResultStatus.FINISHED,
+                        WINNER_POSITION)) {
+            throw new ConflictException(
+                    "Race cannot be completed without an official winner");
+        }
 
         race.setStatus(request.status());
         race.setUpdatedAt(LocalDateTime.now());
@@ -138,14 +150,12 @@ public class RaceService {
     private Race findRaceById(UUID id) {
         return raceRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException(
-                        "Race with id " + id + " was not found"
-                ));
+                        "Race with id " + id + " was not found"));
     }
 
     private void validateStatusTransition(
             RaceStatus currentStatus,
-            RaceStatus requestedStatus
-    ) {
+            RaceStatus requestedStatus) {
         if (currentStatus == requestedStatus) {
             return;
         }
@@ -166,8 +176,7 @@ public class RaceService {
                     "Invalid race status transition from "
                             + currentStatus
                             + " to "
-                            + requestedStatus
-            );
+                            + requestedStatus);
         }
     }
 

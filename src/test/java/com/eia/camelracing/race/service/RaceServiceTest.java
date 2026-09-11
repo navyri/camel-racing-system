@@ -23,6 +23,8 @@ import com.eia.camelracing.race.entity.Race;
 import com.eia.camelracing.race.entity.RaceStatus;
 import com.eia.camelracing.race.entity.RaceType;
 import com.eia.camelracing.race.repository.RaceRepository;
+import com.eia.camelracing.result.entity.ResultStatus;
+import com.eia.camelracing.result.repository.RaceResultRepository;
 import com.eia.camelracing.user.entity.User;
 
 import org.junit.jupiter.api.DisplayName;
@@ -41,8 +43,13 @@ import org.springframework.data.domain.Sort;
 @DisplayName("Race service")
 class RaceServiceTest {
 
+    private static final int WINNER_POSITION = 1;
+
     @Mock
     private RaceRepository raceRepository;
+
+    @Mock
+    private RaceResultRepository resultRepository;
 
     @Mock
     private CurrentUserService currentUserService;
@@ -83,15 +90,13 @@ class RaceServiceTest {
         PageRequest pageable = PageRequest.of(
                 0,
                 10,
-                Sort.by("scheduledAt").ascending()
-        );
+                Sort.by("scheduledAt").ascending());
 
         when(raceRepository.findAllByFilters(
                 RaceStatus.DRAFT,
                 RaceType.MIXED,
                 "great",
-                pageable
-        )).thenReturn(new PageImpl<>(List.of(race), pageable, 1));
+                pageable)).thenReturn(new PageImpl<>(List.of(race), pageable, 1));
 
         PageResponse<RaceResponse> response = raceService.getRaces(
                 RaceStatus.DRAFT,
@@ -99,8 +104,7 @@ class RaceServiceTest {
                 "great",
                 0,
                 10,
-                "scheduledAt,asc"
-        );
+                "scheduledAt,asc");
 
         assertThat(response.content()).hasSize(1);
         assertThat(response.content().getFirst().name()).isEqualTo("The Great Mixed Race");
@@ -121,10 +125,61 @@ class RaceServiceTest {
 
         RaceResponse response = raceService.updateRaceStatus(
                 id,
-                new RaceStatusRequest(RaceStatus.OPEN_FOR_REGISTRATION)
-        );
+                new RaceStatusRequest(RaceStatus.OPEN_FOR_REGISTRATION));
 
         assertThat(response.status()).isEqualTo(RaceStatus.OPEN_FOR_REGISTRATION);
+        verify(raceRepository).save(race);
+    }
+
+    @Test
+    @DisplayName("rejects in-progress completion without official winner")
+    void rejectsInProgressCompletionWithoutOfficialWinner() {
+        UUID id = UUID.randomUUID();
+        Race race = race(RaceStatus.IN_PROGRESS);
+        race.setId(id);
+
+        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+        when(resultRepository.existsOfficialWinnerByRaceId(
+                id,
+                ResultStatus.FINISHED,
+                WINNER_POSITION)).thenReturn(false);
+
+        assertThatThrownBy(() -> raceService.updateRaceStatus(
+                id,
+                new RaceStatusRequest(RaceStatus.COMPLETED)))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("Race cannot be completed without an official winner");
+
+        assertThat(race.getStatus()).isEqualTo(RaceStatus.IN_PROGRESS);
+        verify(resultRepository).existsOfficialWinnerByRaceId(
+                id,
+                ResultStatus.FINISHED,
+                WINNER_POSITION);
+    }
+
+    @Test
+    @DisplayName("allows in-progress completion with official winner")
+    void allowsInProgressCompletionWithOfficialWinner() {
+        UUID id = UUID.randomUUID();
+        Race race = race(RaceStatus.IN_PROGRESS);
+        race.setId(id);
+
+        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+        when(resultRepository.existsOfficialWinnerByRaceId(
+                id,
+                ResultStatus.FINISHED,
+                WINNER_POSITION)).thenReturn(true);
+        when(raceRepository.save(race)).thenReturn(race);
+
+        RaceResponse response = raceService.updateRaceStatus(
+                id,
+                new RaceStatusRequest(RaceStatus.COMPLETED));
+
+        assertThat(response.status()).isEqualTo(RaceStatus.COMPLETED);
+        verify(resultRepository).existsOfficialWinnerByRaceId(
+                id,
+                ResultStatus.FINISHED,
+                WINNER_POSITION);
         verify(raceRepository).save(race);
     }
 
@@ -139,8 +194,7 @@ class RaceServiceTest {
 
         assertThatThrownBy(() -> raceService.updateRaceStatus(
                 id,
-                new RaceStatusRequest(RaceStatus.COMPLETED)
-        ))
+                new RaceStatusRequest(RaceStatus.COMPLETED)))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Invalid race status transition from DRAFT to COMPLETED");
     }
@@ -227,8 +281,7 @@ class RaceServiceTest {
                 null,
                 0,
                 101,
-                "scheduledAt,asc"
-        ))
+                "scheduledAt,asc"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Size must be between 1 and 100");
     }
@@ -255,8 +308,7 @@ class RaceServiceTest {
                 new BigDecimal("1000.00"),
                 10,
                 RaceType.MIXED,
-                LocalDateTime.now().plusDays(4)
-        );
+                LocalDateTime.now().plusDays(4));
     }
 
     private Race race(RaceStatus status) {
