@@ -46,7 +46,7 @@ services:
 
   backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     container_name: camel-racing-backend
     restart: unless-stopped
