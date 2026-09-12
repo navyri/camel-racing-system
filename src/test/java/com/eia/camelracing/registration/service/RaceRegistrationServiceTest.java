@@ -667,6 +667,7 @@ class RaceRegistrationServiceTest {
                 assertThat(registration.getRegisteredBy()).isEqualTo(organizer);
 
                 verify(registrationRepository).findDetailedById(registrationId);
+                verify(registrationRepository, times(1)).save(registration);
                 verify(auditLogService).log(
                                 eq(organizer),
                                 eq(AuditLogService.ACTION_REGISTRATION_APPROVED),
