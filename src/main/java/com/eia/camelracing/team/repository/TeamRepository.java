@@ -23,9 +23,9 @@ public interface TeamRepository extends JpaRepository<Team, UUID> {
             from Team team
             where (:status is null or team.status = :status)
                 and (
-                    :search is null
-                    or lower(team.name) like lower(concat('%', :search, '%'))
-                    or lower(team.coachName) like lower(concat('%', :search, '%'))
+                    coalesce(:search, '') = ''
+                    or lower(team.name) like lower(concat('%', coalesce(:search, ''), '%'))
+                    or lower(team.coachName) like lower(concat('%', coalesce(:search, ''), '%'))
                 )
             """)
     Page<Team> findAllByFilters(

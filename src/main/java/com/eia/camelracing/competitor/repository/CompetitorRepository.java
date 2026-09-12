@@ -25,13 +25,13 @@ public interface CompetitorRepository extends JpaRepository<Competitor, UUID> {
             where (:competitorType is null or competitor.competitorType = :competitorType)
                 and (:status is null or competitor.status = :status)
                 and (
-                    :origin is null
-                    or lower(competitor.origin) like lower(concat('%', :origin, '%'))
+                    coalesce(:origin, '') = ''
+                    or lower(competitor.origin) like lower(concat('%', coalesce(:origin, ''), '%'))
                 )
                 and (
-                    :search is null
-                    or lower(competitor.name) like lower(concat('%', :search, '%'))
-                    or lower(competitor.nickname) like lower(concat('%', :search, '%'))
+                    coalesce(:search, '') = ''
+                    or lower(competitor.name) like lower(concat('%', coalesce(:search, ''), '%'))
+                    or lower(competitor.nickname) like lower(concat('%', coalesce(:search, ''), '%'))
                 )
             """)
     Page<Competitor> findAllByFilters(
@@ -40,4 +40,4 @@ public interface CompetitorRepository extends JpaRepository<Competitor, UUID> {
             @Param("origin") String origin,
             @Param("search") String search,
             Pageable pageable);
-        }
+}
