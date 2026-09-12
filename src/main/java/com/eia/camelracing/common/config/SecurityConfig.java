@@ -35,6 +35,8 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/error")
                         .permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/audit-logs/**")
+                        .hasRole("ADMINISTRATOR")
                         .requestMatchers(HttpMethod.GET, "/api/competitors/**")
                         .hasAnyRole("ADMINISTRATOR", "RACE_ORGANIZER", "VIEWER")
                         .requestMatchers("/api/competitors/**")

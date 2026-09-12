@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.eia.camelracing.audit.service.AuditLogService;
 import com.eia.camelracing.user.entity.User;
 import com.eia.camelracing.user.repository.UserRepository;
 
@@ -42,6 +44,9 @@ class CurrentUserServiceTest {
         @Mock
         private UserRepository userRepository;
 
+        @Mock
+        private AuditLogService auditLogService;
+
         @InjectMocks
         private CurrentUserService currentUserService;
 
@@ -65,7 +70,11 @@ class CurrentUserServiceTest {
                 when(userRepository.findByKeycloakSubject("keycloak-subject"))
                                 .thenReturn(Optional.empty());
                 when(userRepository.save(any(User.class)))
-                                .thenAnswer(invocation -> invocation.getArgument(0));
+                                .thenAnswer(invocation -> {
+                                        User savedUser = invocation.getArgument(0);
+                                        savedUser.setId(java.util.UUID.randomUUID());
+                                        return savedUser;
+                                });
 
                 User user = currentUserService.getOrSynchronizeCurrentUser();
 
@@ -81,6 +90,15 @@ class CurrentUserServiceTest {
                 assertThat(savedUser.getLastName()).isEqualTo("Organizer");
                 assertThat(savedUser.isEnabled()).isTrue();
                 assertThat(savedUser.getCreatedAt()).isNotNull();
+
+                verify(auditLogService).log(
+                                eq(savedUser),
+                                eq(AuditLogService.ACTION_USER_CREATED),
+                                eq("USER"),
+                                eq(savedUser.getId().toString()),
+                                eq("Local user created from authenticated JWT"),
+                                eq(null),
+                                eq("username=organizer, email=organizer@camel-racing.test"));
         }
 
         @Test
@@ -117,6 +135,14 @@ class CurrentUserServiceTest {
                 assertThat(user.isEnabled()).isTrue();
 
                 verify(userRepository).save(existingUser);
+                verify(auditLogService, never()).log(
+                                any(User.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class));
         }
 
         @Test
@@ -131,6 +157,7 @@ class CurrentUserServiceTest {
                 SecurityContextHolder.getContext().setAuthentication(authentication);
 
                 User createdUser = User.builder()
+                                .id(java.util.UUID.randomUUID())
                                 .keycloakSubject(FALLBACK_KEYCLOAK_SUBJECT)
                                 .username(FALLBACK_USERNAME)
                                 .email("organizer@camel-racing.test")
@@ -140,9 +167,17 @@ class CurrentUserServiceTest {
                                 .build();
 
                 when(userRepository.findByKeycloakSubject(FALLBACK_KEYCLOAK_SUBJECT))
-                                .thenReturn(Optional.<User>empty(), Optional.of(createdUser));
+                                .thenReturn(Optional.empty(), Optional.of(createdUser));
                 when(userRepository.save(any(User.class)))
-                                .thenAnswer(invocation -> invocation.getArgument(0));
+                                .thenAnswer(invocation -> {
+                                        User savedUser = invocation.getArgument(0);
+
+                                        if (savedUser.getId() == null) {
+                                                savedUser.setId(java.util.UUID.randomUUID());
+                                        }
+
+                                        return savedUser;
+                                });
 
                 User firstUser = currentUserService.getOrSynchronizeCurrentUser();
                 User secondUser = currentUserService.getOrSynchronizeCurrentUser();
@@ -156,9 +191,28 @@ class CurrentUserServiceTest {
                 assertThat(firstUser.getKeycloakSubject()).isEqualTo(FALLBACK_KEYCLOAK_SUBJECT);
                 assertThat(secondUser).isSameAs(createdUser);
                 assertThat(savedUsers).hasSize(2);
-                assertThat(savedUsers.getFirst().getKeycloakSubject()).isEqualTo(FALLBACK_KEYCLOAK_SUBJECT);
+                assertThat(savedUsers.getFirst().getKeycloakSubject())
+                                .isEqualTo(FALLBACK_KEYCLOAK_SUBJECT);
                 assertThat(savedUsers.getLast()).isSameAs(createdUser);
-                assertThat(savedUsers.getLast().getKeycloakSubject()).isEqualTo(FALLBACK_KEYCLOAK_SUBJECT);
+                assertThat(savedUsers.getLast().getKeycloakSubject())
+                                .isEqualTo(FALLBACK_KEYCLOAK_SUBJECT);
+
+                verify(auditLogService).log(
+                                eq(firstUser),
+                                eq(AuditLogService.ACTION_USER_CREATED),
+                                eq("USER"),
+                                eq(firstUser.getId().toString()),
+                                eq("Local user created from authenticated JWT"),
+                                eq(null),
+                                eq("username=organizer, email=organizer@camel-racing.test"));
+                verify(auditLogService, times(1)).log(
+                                any(User.class),
+                                eq(AuditLogService.ACTION_USER_CREATED),
+                                eq("USER"),
+                                any(String.class),
+                                eq("Local user created from authenticated JWT"),
+                                eq(null),
+                                any(String.class));
         }
 
         @Test
@@ -170,6 +224,15 @@ class CurrentUserServiceTest {
                 assertThatThrownBy(() -> currentUserService.getOrSynchronizeCurrentUser())
                                 .isInstanceOf(IllegalStateException.class)
                                 .hasMessage("Authenticated JWT user is required");
+
+                verify(auditLogService, never()).log(
+                                any(User.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class));
         }
 
         private JwtAuthenticationToken authentication(

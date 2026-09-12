@@ -2,6 +2,7 @@ package com.eia.camelracing.common.service;
 
 import java.time.LocalDateTime;
 
+import com.eia.camelracing.audit.service.AuditLogService;
 import com.eia.camelracing.user.entity.User;
 import com.eia.camelracing.user.repository.UserRepository;
 
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class CurrentUserService {
 
     private final UserRepository userRepository;
+    private final AuditLogService auditLogService;
 
     @Transactional
     public User getOrSynchronizeCurrentUser() {
@@ -36,8 +38,7 @@ public class CurrentUserService {
                         username,
                         email,
                         firstName,
-                        lastName
-                ));
+                        lastName));
     }
 
     private Jwt getCurrentJwt() {
@@ -125,8 +126,7 @@ public class CurrentUserService {
             String username,
             String email,
             String firstName,
-            String lastName
-    ) {
+            String lastName) {
         User user = User.builder()
                 .keycloakSubject(keycloakSubject)
                 .username(username)
@@ -137,7 +137,19 @@ public class CurrentUserService {
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        return userRepository.save(user);
+        User savedUser = userRepository.save(user);
+
+        auditLogService.log(
+                savedUser,
+                AuditLogService.ACTION_USER_CREATED,
+                "USER",
+                savedUser.getId().toString(),
+                "Local user created from authenticated JWT",
+                null,
+                "username=" + savedUser.getUsername()
+                        + ", email=" + savedUser.getEmail());
+
+        return savedUser;
     }
 
     private User updateUser(
@@ -145,8 +157,7 @@ public class CurrentUserService {
             String username,
             String email,
             String firstName,
-            String lastName
-    ) {
+            String lastName) {
         user.setUsername(username);
         user.setEmail(email);
         user.setFirstName(firstName);

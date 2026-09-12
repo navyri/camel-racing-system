@@ -3,6 +3,7 @@ package com.eia.camelracing.registration.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.eia.camelracing.audit.service.AuditLogService;
 import com.eia.camelracing.common.exception.ConflictException;
 import com.eia.camelracing.common.service.CurrentUserService;
 import com.eia.camelracing.competitor.entity.Competitor;
@@ -75,6 +77,9 @@ class RaceRegistrationServiceTest {
 
         @Mock
         private CurrentUserService currentUserService;
+
+        @Mock
+        private AuditLogService auditLogService;
 
         @InjectMocks
         private RaceRegistrationService registrationService;
@@ -226,9 +231,9 @@ class RaceRegistrationServiceTest {
                                 raceId,
                                 CAPACITY_CONSUMING_STATUSES);
                 verify(registrationRepository, never()).existsByRaceIdAndStartingPositionAndStatusIn(
-                        org.mockito.ArgumentMatchers.eq(raceId),
-                        org.mockito.ArgumentMatchers.any(),
-                        org.mockito.ArgumentMatchers.eq(CAPACITY_CONSUMING_STATUSES));
+                                org.mockito.ArgumentMatchers.eq(raceId),
+                                org.mockito.ArgumentMatchers.any(),
+                                org.mockito.ArgumentMatchers.eq(CAPACITY_CONSUMING_STATUSES));
                 verify(competitorRepository, never()).findById(competitorId);
                 verify(teamRepository, never()).findById(any(UUID.class));
                 verify(registrationRepository, never()).save(any(RaceRegistration.class));
@@ -663,6 +668,14 @@ class RaceRegistrationServiceTest {
 
                 verify(registrationRepository).findDetailedById(registrationId);
                 verify(registrationRepository, times(1)).save(registration);
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_REGISTRATION_APPROVED),
+                                eq("REGISTRATION"),
+                                eq(registrationId.toString()),
+                                eq("Registration approved"),
+                                eq("status=PENDING"),
+                                eq("status=APPROVED"));
         }
 
         @Test
@@ -763,6 +776,14 @@ class RaceRegistrationServiceTest {
 
                 verify(registrationRepository).findDetailedById(registrationId);
                 verify(registrationRepository, times(1)).save(registration);
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_REGISTRATION_REJECTED),
+                                eq("REGISTRATION"),
+                                eq(registrationId.toString()),
+                                eq("Registration rejected"),
+                                eq("status=PENDING"),
+                                eq("status=REJECTED, reason=Participant does not meet the event requirements"));
         }
 
         @Test
@@ -852,6 +873,14 @@ class RaceRegistrationServiceTest {
 
                 verify(registrationRepository).findDetailedById(registrationId);
                 verify(registrationRepository, times(1)).save(registration);
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_REGISTRATION_CANCELLED),
+                                eq("REGISTRATION"),
+                                eq(registrationId.toString()),
+                                eq("Registration cancelled"),
+                                eq("status=PENDING"),
+                                eq("status=CANCELLED"));
         }
 
         @Test
@@ -897,6 +926,14 @@ class RaceRegistrationServiceTest {
 
                 verify(registrationRepository).findDetailedById(registrationId);
                 verify(registrationRepository, times(1)).save(registration);
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_REGISTRATION_CANCELLED),
+                                eq("REGISTRATION"),
+                                eq(registrationId.toString()),
+                                eq("Registration cancelled"),
+                                eq("status=APPROVED"),
+                                eq("status=CANCELLED"));
         }
 
         @Test

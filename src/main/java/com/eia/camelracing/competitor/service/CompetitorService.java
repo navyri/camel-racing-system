@@ -1,12 +1,16 @@
 package com.eia.camelracing.competitor.service;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.UUID;
 
+import com.eia.camelracing.audit.service.AuditLogService;
 import com.eia.camelracing.common.dto.PageResponse;
 import com.eia.camelracing.common.exception.ConflictException;
+import com.eia.camelracing.common.service.CurrentUserService;
 import com.eia.camelracing.competitor.dto.CompetitorRequest;
 import com.eia.camelracing.competitor.dto.CompetitorResponse;
 import com.eia.camelracing.competitor.dto.CompetitorStatusRequest;
@@ -15,6 +19,7 @@ import com.eia.camelracing.competitor.entity.CompetitorStatus;
 import com.eia.camelracing.competitor.entity.CompetitorType;
 import com.eia.camelracing.competitor.mapper.CompetitorMapper;
 import com.eia.camelracing.competitor.repository.CompetitorRepository;
+import com.eia.camelracing.user.entity.User;
 
 import lombok.RequiredArgsConstructor;
 
@@ -39,10 +44,11 @@ public class CompetitorService {
             "registrationDate",
             "victories",
             "defeats",
-            "completedRaces"
-    );
+            "completedRaces");
 
     private final CompetitorRepository competitorRepository;
+    private final CurrentUserService currentUserService;
+    private final AuditLogService auditLogService;
 
     @Transactional
     public CompetitorResponse createCompetitor(CompetitorRequest request) {
@@ -65,18 +71,15 @@ public class CompetitorService {
             String search,
             Integer page,
             Integer size,
-            String sort
-    ) {
+            String sort) {
         Pageable pageable = buildPageable(page, size, sort);
 
         Page<CompetitorResponse> competitors = competitorRepository.findAllByFilters(
-                        type,
-                        status,
-                        normalizeFilter(origin),
-                        normalizeFilter(search),
-                        pageable
-                )
-                .map(CompetitorMapper::toResponse);
+                type,
+                status,
+                normalizeFilter(origin),
+                normalizeFilter(search),
+                pageable).map(CompetitorMapper::toResponse);
 
         return PageResponse.from(competitors);
     }
@@ -91,9 +94,23 @@ public class CompetitorService {
         Competitor competitor = findCompetitorById(id);
         validateNicknameAvailable(request.nickname(), id);
 
+        String previousValue = competitorSnapshot(competitor);
+
         CompetitorMapper.updateEntity(competitor, request);
 
-        return CompetitorMapper.toResponse(competitorRepository.save(competitor));
+        Competitor savedCompetitor = competitorRepository.save(competitor);
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+        auditLogService.log(
+                currentUser,
+                AuditLogService.ACTION_COMPETITOR_UPDATED,
+                "COMPETITOR",
+                savedCompetitor.getId().toString(),
+                "Competitor information updated",
+                previousValue,
+                competitorSnapshot(savedCompetitor));
+
+        return CompetitorMapper.toResponse(savedCompetitor);
     }
 
     @Transactional
@@ -105,9 +122,30 @@ public class CompetitorService {
             throw new ConflictException("A retired competitor cannot be reactivated");
         }
 
+        CompetitorStatus previousStatus = competitor.getStatus();
+
         competitor.setStatus(request.status());
 
-        return CompetitorMapper.toResponse(competitorRepository.save(competitor));
+        Competitor savedCompetitor = competitorRepository.save(competitor);
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+        String action = request.status() == CompetitorStatus.RETIRED
+                ? AuditLogService.ACTION_COMPETITOR_RETIRED
+                : AuditLogService.ACTION_COMPETITOR_STATUS_CHANGED;
+        String description = request.status() == CompetitorStatus.RETIRED
+                ? "Competitor retired"
+                : "Competitor status changed";
+
+        auditLogService.log(
+                currentUser,
+                action,
+                "COMPETITOR",
+                savedCompetitor.getId().toString(),
+                description,
+                "status=" + previousStatus,
+                "status=" + savedCompetitor.getStatus());
+
+        return CompetitorMapper.toResponse(savedCompetitor);
     }
 
     @Transactional
@@ -118,15 +156,26 @@ public class CompetitorService {
             return;
         }
 
+        CompetitorStatus previousStatus = competitor.getStatus();
         competitor.setStatus(CompetitorStatus.RETIRED);
-        competitorRepository.save(competitor);
+
+        Competitor savedCompetitor = competitorRepository.save(competitor);
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+        auditLogService.log(
+                currentUser,
+                AuditLogService.ACTION_COMPETITOR_RETIRED,
+                "COMPETITOR",
+                savedCompetitor.getId().toString(),
+                "Competitor retired",
+                "status=" + previousStatus,
+                "status=" + CompetitorStatus.RETIRED);
     }
 
     private Competitor findCompetitorById(UUID id) {
         return competitorRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException(
-                        "Competitor with id " + id + " was not found"
-                ));
+                        "Competitor with id " + id + " was not found"));
     }
 
     private void validateNicknameAvailable(String nickname, UUID competitorId) {
@@ -185,5 +234,29 @@ public class CompetitorService {
         }
 
         return value.trim();
+    }
+
+    private String competitorSnapshot(Competitor competitor) {
+        return "name=" + competitor.getName()
+                + ", nickname=" + competitor.getNickname()
+                + ", competitorType=" + competitor.getCompetitorType()
+                + ", dateOfBirth=" + valueOf(competitor.getDateOfBirth())
+                + ", approximateAge=" + valueOf(competitor.getApproximateAge())
+                + ", weightKg=" + decimalValue(competitor.getWeightKg())
+                + ", heightCm=" + decimalValue(competitor.getHeightCm())
+                + ", origin=" + competitor.getOrigin()
+                + ", status=" + competitor.getStatus();
+    }
+
+    private String decimalValue(BigDecimal value) {
+        return value == null ? "null" : value.toPlainString();
+    }
+
+    private String valueOf(LocalDate value) {
+        return value == null ? "null" : value.toString();
+    }
+
+    private String valueOf(Integer value) {
+        return value == null ? "null" : value.toString();
     }
 }
