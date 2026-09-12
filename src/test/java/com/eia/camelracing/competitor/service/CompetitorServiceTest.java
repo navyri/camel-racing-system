@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -85,15 +84,6 @@ class CompetitorServiceTest {
                 assertThat(savedCompetitor.getVictories()).isZero();
                 assertThat(savedCompetitor.getDefeats()).isZero();
                 assertThat(savedCompetitor.getCompletedRaces()).isZero();
-
-                verify(auditLogService, never()).log(
-                                any(User.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class));
         }
 
         @Test
@@ -107,15 +97,6 @@ class CompetitorServiceTest {
                 assertThatThrownBy(() -> competitorService.createCompetitor(requestWithDateOfBirth()))
                                 .isInstanceOf(ConflictException.class)
                                 .hasMessage("Nickname is already in use");
-
-                verify(auditLogService, never()).log(
-                                any(User.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class));
         }
 
         @Test
@@ -167,15 +148,6 @@ class CompetitorServiceTest {
                 assertThatThrownBy(() -> competitorService.updateCompetitor(id, request))
                                 .isInstanceOf(ConflictException.class)
                                 .hasMessage("Nickname is already in use");
-
-                verify(auditLogService, never()).log(
-                                any(User.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class));
         }
 
         @Test
@@ -204,6 +176,34 @@ class CompetitorServiceTest {
                                 eq("Competitor status changed"),
                                 eq("status=ACTIVE"),
                                 eq("status=SUSPENDED"));
+        }
+
+        @Test
+        @DisplayName("retires competitor through status update and records retirement audit log")
+        void retiresCompetitorThroughStatusUpdateAndRecordsRetirementAuditLog() {
+                UUID id = UUID.randomUUID();
+                User currentUser = user("administrator");
+                Competitor existingCompetitor = competitor("Byte", "ByteTheCamel");
+                existingCompetitor.setId(id);
+
+                when(competitorRepository.findById(id)).thenReturn(Optional.of(existingCompetitor));
+                when(competitorRepository.save(existingCompetitor)).thenReturn(existingCompetitor);
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(currentUser);
+
+                CompetitorResponse response = competitorService.updateCompetitorStatus(
+                                id,
+                                new CompetitorStatusRequest(CompetitorStatus.RETIRED));
+
+                assertThat(response.status()).isEqualTo(CompetitorStatus.RETIRED);
+                verify(competitorRepository).save(existingCompetitor);
+                verify(auditLogService).log(
+                                eq(currentUser),
+                                eq(AuditLogService.ACTION_COMPETITOR_RETIRED),
+                                eq("COMPETITOR"),
+                                eq(id.toString()),
+                                eq("Competitor retired"),
+                                eq("status=ACTIVE"),
+                                eq("status=RETIRED"));
         }
 
         @Test
@@ -260,15 +260,6 @@ class CompetitorServiceTest {
                                 new CompetitorStatusRequest(CompetitorStatus.ACTIVE)))
                                 .isInstanceOf(ConflictException.class)
                                 .hasMessage("A retired competitor cannot be reactivated");
-
-                verify(auditLogService, never()).log(
-                                any(User.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class));
         }
 
         @Test

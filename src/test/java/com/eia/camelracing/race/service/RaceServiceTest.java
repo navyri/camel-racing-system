@@ -136,6 +136,34 @@ class RaceServiceTest {
         }
 
         @Test
+        @DisplayName("audits cancellation through race status update")
+        void auditsCancellationThroughRaceStatusUpdate() {
+                UUID id = UUID.randomUUID();
+                User currentUser = organizer();
+                Race race = race(RaceStatus.DRAFT);
+                race.setId(id);
+
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                when(raceRepository.save(race)).thenReturn(race);
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(currentUser);
+
+                RaceResponse response = raceService.updateRaceStatus(
+                                id,
+                                new RaceStatusRequest(RaceStatus.CANCELLED));
+
+                assertThat(response.status()).isEqualTo(RaceStatus.CANCELLED);
+                verify(raceRepository).save(race);
+                verify(auditLogService).log(
+                                org.mockito.ArgumentMatchers.eq(currentUser),
+                                org.mockito.ArgumentMatchers.eq(AuditLogService.ACTION_RACE_CANCELLED),
+                                org.mockito.ArgumentMatchers.eq("RACE"),
+                                org.mockito.ArgumentMatchers.eq(id.toString()),
+                                org.mockito.ArgumentMatchers.eq("Race cancelled"),
+                                org.mockito.ArgumentMatchers.eq("status=DRAFT"),
+                                org.mockito.ArgumentMatchers.eq("status=CANCELLED"));
+        }
+
+        @Test
         @DisplayName("rejects in-progress completion without official winner")
         void rejectsInProgressCompletionWithoutOfficialWinner() {
                 UUID id = UUID.randomUUID();

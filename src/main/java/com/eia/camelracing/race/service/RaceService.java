@@ -121,10 +121,27 @@ public class RaceService {
                     "Race cannot be completed without an official winner");
         }
 
+        RaceStatus previousStatus = race.getStatus();
+
         race.setStatus(request.status());
         race.setUpdatedAt(LocalDateTime.now());
 
-        return RaceMapper.toResponse(raceRepository.save(race));
+        Race savedRace = raceRepository.save(race);
+
+        if (request.status() == RaceStatus.CANCELLED) {
+            User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+            auditLogService.log(
+                    currentUser,
+                    AuditLogService.ACTION_RACE_CANCELLED,
+                    "RACE",
+                    savedRace.getId().toString(),
+                    "Race cancelled",
+                    "status=" + previousStatus,
+                    "status=" + RaceStatus.CANCELLED);
+        }
+
+        return RaceMapper.toResponse(savedRace);
     }
 
     @Transactional

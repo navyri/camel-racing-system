@@ -79,8 +79,7 @@ public class CompetitorService {
                 status,
                 normalizeFilter(origin),
                 normalizeFilter(search),
-                pageable)
-                .map(CompetitorMapper::toResponse);
+                pageable).map(CompetitorMapper::toResponse);
 
         return PageResponse.from(competitors);
     }
@@ -124,17 +123,25 @@ public class CompetitorService {
         }
 
         CompetitorStatus previousStatus = competitor.getStatus();
+
         competitor.setStatus(request.status());
 
         Competitor savedCompetitor = competitorRepository.save(competitor);
         User currentUser = currentUserService.getOrSynchronizeCurrentUser();
 
+        String action = request.status() == CompetitorStatus.RETIRED
+                ? AuditLogService.ACTION_COMPETITOR_RETIRED
+                : AuditLogService.ACTION_COMPETITOR_STATUS_CHANGED;
+        String description = request.status() == CompetitorStatus.RETIRED
+                ? "Competitor retired"
+                : "Competitor status changed";
+
         auditLogService.log(
                 currentUser,
-                AuditLogService.ACTION_COMPETITOR_STATUS_CHANGED,
+                action,
                 "COMPETITOR",
                 savedCompetitor.getId().toString(),
-                "Competitor status changed",
+                description,
                 "status=" + previousStatus,
                 "status=" + savedCompetitor.getStatus());
 
