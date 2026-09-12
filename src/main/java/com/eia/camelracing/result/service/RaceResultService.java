@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
+import com.eia.camelracing.audit.service.AuditLogService;
 import com.eia.camelracing.common.exception.ConflictException;
 import com.eia.camelracing.common.service.CurrentUserService;
 import com.eia.camelracing.competitor.entity.Competitor;
@@ -53,6 +54,7 @@ public class RaceResultService {
     private final CompetitorRepository competitorRepository;
     private final TeamRepository teamRepository;
     private final CurrentUserService currentUserService;
+    private final AuditLogService auditLogService;
 
     @Transactional
     public RaceResultResponse createResult(UUID raceId, RaceResultRequest request) {
@@ -124,6 +126,8 @@ public class RaceResultService {
         User currentUser = currentUserService.getOrSynchronizeCurrentUser();
         validateOrganizerPermission(race, currentUser);
 
+        String previousValue = resultSnapshot(result);
+
         ResultValues resultValues = resolveResultValues(
                 race.getId(),
                 request.finalPosition(),
@@ -140,6 +144,15 @@ public class RaceResultService {
 
         RaceResult savedResult = resultRepository.save(result);
         recalculateStatistics(savedResult.getRegistration());
+
+        auditLogService.log(
+                currentUser,
+                AuditLogService.ACTION_RESULT_UPDATED,
+                "RESULT",
+                savedResult.getId().toString(),
+                "Race result updated",
+                previousValue,
+                resultSnapshot(savedResult));
 
         return RaceResultMapper.toResponse(savedResult);
     }
@@ -301,6 +314,26 @@ public class RaceResultService {
         }
 
         return notes.trim();
+    }
+
+    private String resultSnapshot(RaceResult result) {
+        return "finalPosition=" + valueOf(result.getFinalPosition())
+                + ", completionTimeSeconds=" + durationSeconds(result.getCompletionTime())
+                + ", penaltyTimeSeconds=" + durationSeconds(result.getPenaltyTime())
+                + ", status=" + result.getStatus()
+                + ", notes=" + valueOf(result.getNotes());
+    }
+
+    private String durationSeconds(Duration duration) {
+        return duration == null ? "null" : Long.toString(duration.getSeconds());
+    }
+
+    private String valueOf(Integer value) {
+        return value == null ? "null" : value.toString();
+    }
+
+    private String valueOf(String value) {
+        return value == null ? "null" : value;
     }
 
     private record ResultValues(

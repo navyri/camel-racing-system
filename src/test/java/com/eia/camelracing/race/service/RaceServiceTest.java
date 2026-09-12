@@ -13,6 +13,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.eia.camelracing.audit.service.AuditLogService;
 import com.eia.camelracing.common.dto.PageResponse;
 import com.eia.camelracing.common.exception.ConflictException;
 import com.eia.camelracing.common.service.CurrentUserService;
@@ -43,302 +44,317 @@ import org.springframework.data.domain.Sort;
 @DisplayName("Race service")
 class RaceServiceTest {
 
-    private static final int WINNER_POSITION = 1;
+        private static final int WINNER_POSITION = 1;
 
-    @Mock
-    private RaceRepository raceRepository;
+        @Mock
+        private RaceRepository raceRepository;
 
-    @Mock
-    private RaceResultRepository resultRepository;
+        @Mock
+        private RaceResultRepository resultRepository;
 
-    @Mock
-    private CurrentUserService currentUserService;
+        @Mock
+        private CurrentUserService currentUserService;
 
-    @InjectMocks
-    private RaceService raceService;
+        @Mock
+        private AuditLogService auditLogService;
 
-    @Test
-    @DisplayName("creates draft race with synchronized organizer")
-    void createsDraftRaceWithSynchronizedOrganizer() {
-        User organizer = organizer();
+        @InjectMocks
+        private RaceService raceService;
 
-        when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-        when(raceRepository.save(any(Race.class))).thenAnswer(invocation -> {
-            Race race = invocation.getArgument(0);
-            race.setId(UUID.randomUUID());
-            return race;
-        });
+        @Test
+        @DisplayName("creates draft race with synchronized organizer")
+        void createsDraftRaceWithSynchronizedOrganizer() {
+                User organizer = organizer();
 
-        RaceResponse response = raceService.createRace(request());
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(raceRepository.save(any(Race.class))).thenAnswer(invocation -> {
+                        Race race = invocation.getArgument(0);
+                        race.setId(UUID.randomUUID());
+                        return race;
+                });
 
-        assertThat(response.id()).isNotNull();
-        assertThat(response.status()).isEqualTo(RaceStatus.DRAFT);
-        assertThat(response.organizerId()).isEqualTo(organizer.getId());
-        assertThat(response.createdAt()).isNotNull();
-        assertThat(response.updatedAt()).isNotNull();
+                RaceResponse response = raceService.createRace(request());
 
-        verify(currentUserService).getOrSynchronizeCurrentUser();
-        verify(raceRepository).save(any(Race.class));
-    }
+                assertThat(response.id()).isNotNull();
+                assertThat(response.status()).isEqualTo(RaceStatus.DRAFT);
+                assertThat(response.organizerId()).isEqualTo(organizer.getId());
+                assertThat(response.createdAt()).isNotNull();
+                assertThat(response.updatedAt()).isNotNull();
 
-    @Test
-    @DisplayName("returns filtered paginated races")
-    void returnsFilteredPaginatedRaces() {
-        Race race = race(RaceStatus.DRAFT);
-        race.setId(UUID.randomUUID());
+                verify(currentUserService).getOrSynchronizeCurrentUser();
+                verify(raceRepository).save(any(Race.class));
+        }
 
-        PageRequest pageable = PageRequest.of(
-                0,
-                10,
-                Sort.by("scheduledAt").ascending());
+        @Test
+        @DisplayName("returns filtered paginated races")
+        void returnsFilteredPaginatedRaces() {
+                Race race = race(RaceStatus.DRAFT);
+                race.setId(UUID.randomUUID());
 
-        when(raceRepository.findAllByFilters(
-                RaceStatus.DRAFT,
-                RaceType.MIXED,
-                "great",
-                pageable)).thenReturn(new PageImpl<>(List.of(race), pageable, 1));
+                PageRequest pageable = PageRequest.of(
+                                0,
+                                10,
+                                Sort.by("scheduledAt").ascending());
 
-        PageResponse<RaceResponse> response = raceService.getRaces(
-                RaceStatus.DRAFT,
-                RaceType.MIXED,
-                "great",
-                0,
-                10,
-                "scheduledAt,asc");
+                when(raceRepository.findAllByFilters(
+                                RaceStatus.DRAFT,
+                                RaceType.MIXED,
+                                "great",
+                                pageable)).thenReturn(new PageImpl<>(List.of(race), pageable, 1));
 
-        assertThat(response.content()).hasSize(1);
-        assertThat(response.content().getFirst().name()).isEqualTo("The Great Mixed Race");
-        assertThat(response.totalElements()).isEqualTo(1);
-        assertThat(response.first()).isTrue();
-        assertThat(response.last()).isTrue();
-    }
+                PageResponse<RaceResponse> response = raceService.getRaces(
+                                RaceStatus.DRAFT,
+                                RaceType.MIXED,
+                                "great",
+                                0,
+                                10,
+                                "scheduledAt,asc");
 
-    @Test
-    @DisplayName("allows valid draft to open transition")
-    void allowsValidDraftToOpenTransition() {
-        UUID id = UUID.randomUUID();
-        Race race = race(RaceStatus.DRAFT);
-        race.setId(id);
+                assertThat(response.content()).hasSize(1);
+                assertThat(response.content().getFirst().name()).isEqualTo("The Great Mixed Race");
+                assertThat(response.totalElements()).isEqualTo(1);
+                assertThat(response.first()).isTrue();
+                assertThat(response.last()).isTrue();
+        }
 
-        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
-        when(raceRepository.save(race)).thenReturn(race);
+        @Test
+        @DisplayName("allows valid draft to open transition")
+        void allowsValidDraftToOpenTransition() {
+                UUID id = UUID.randomUUID();
+                Race race = race(RaceStatus.DRAFT);
+                race.setId(id);
 
-        RaceResponse response = raceService.updateRaceStatus(
-                id,
-                new RaceStatusRequest(RaceStatus.OPEN_FOR_REGISTRATION));
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                when(raceRepository.save(race)).thenReturn(race);
 
-        assertThat(response.status()).isEqualTo(RaceStatus.OPEN_FOR_REGISTRATION);
-        verify(raceRepository).save(race);
-    }
+                RaceResponse response = raceService.updateRaceStatus(
+                                id,
+                                new RaceStatusRequest(RaceStatus.OPEN_FOR_REGISTRATION));
 
-    @Test
-    @DisplayName("rejects in-progress completion without official winner")
-    void rejectsInProgressCompletionWithoutOfficialWinner() {
-        UUID id = UUID.randomUUID();
-        Race race = race(RaceStatus.IN_PROGRESS);
-        race.setId(id);
+                assertThat(response.status()).isEqualTo(RaceStatus.OPEN_FOR_REGISTRATION);
+                verify(raceRepository).save(race);
+        }
 
-        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
-        when(resultRepository.existsOfficialWinnerByRaceId(
-                id,
-                ResultStatus.FINISHED,
-                WINNER_POSITION)).thenReturn(false);
+        @Test
+        @DisplayName("rejects in-progress completion without official winner")
+        void rejectsInProgressCompletionWithoutOfficialWinner() {
+                UUID id = UUID.randomUUID();
+                Race race = race(RaceStatus.IN_PROGRESS);
+                race.setId(id);
 
-        assertThatThrownBy(() -> raceService.updateRaceStatus(
-                id,
-                new RaceStatusRequest(RaceStatus.COMPLETED)))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("Race cannot be completed without an official winner");
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                when(resultRepository.existsOfficialWinnerByRaceId(
+                                id,
+                                ResultStatus.FINISHED,
+                                WINNER_POSITION)).thenReturn(false);
 
-        assertThat(race.getStatus()).isEqualTo(RaceStatus.IN_PROGRESS);
-        verify(resultRepository).existsOfficialWinnerByRaceId(
-                id,
-                ResultStatus.FINISHED,
-                WINNER_POSITION);
-    }
+                assertThatThrownBy(() -> raceService.updateRaceStatus(
+                                id,
+                                new RaceStatusRequest(RaceStatus.COMPLETED)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Race cannot be completed without an official winner");
 
-    @Test
-    @DisplayName("allows in-progress completion with official winner")
-    void allowsInProgressCompletionWithOfficialWinner() {
-        UUID id = UUID.randomUUID();
-        Race race = race(RaceStatus.IN_PROGRESS);
-        race.setId(id);
+                assertThat(race.getStatus()).isEqualTo(RaceStatus.IN_PROGRESS);
+                verify(resultRepository).existsOfficialWinnerByRaceId(
+                                id,
+                                ResultStatus.FINISHED,
+                                WINNER_POSITION);
+        }
 
-        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
-        when(resultRepository.existsOfficialWinnerByRaceId(
-                id,
-                ResultStatus.FINISHED,
-                WINNER_POSITION)).thenReturn(true);
-        when(raceRepository.save(race)).thenReturn(race);
+        @Test
+        @DisplayName("allows in-progress completion with official winner")
+        void allowsInProgressCompletionWithOfficialWinner() {
+                UUID id = UUID.randomUUID();
+                Race race = race(RaceStatus.IN_PROGRESS);
+                race.setId(id);
 
-        RaceResponse response = raceService.updateRaceStatus(
-                id,
-                new RaceStatusRequest(RaceStatus.COMPLETED));
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                when(resultRepository.existsOfficialWinnerByRaceId(
+                                id,
+                                ResultStatus.FINISHED,
+                                WINNER_POSITION)).thenReturn(true);
+                when(raceRepository.save(race)).thenReturn(race);
 
-        assertThat(response.status()).isEqualTo(RaceStatus.COMPLETED);
-        verify(resultRepository).existsOfficialWinnerByRaceId(
-                id,
-                ResultStatus.FINISHED,
-                WINNER_POSITION);
-        verify(raceRepository).save(race);
-    }
+                RaceResponse response = raceService.updateRaceStatus(
+                                id,
+                                new RaceStatusRequest(RaceStatus.COMPLETED));
 
-    @Test
-    @DisplayName("rejects invalid draft to completed transition")
-    void rejectsInvalidDraftToCompletedTransition() {
-        UUID id = UUID.randomUUID();
-        Race race = race(RaceStatus.DRAFT);
-        race.setId(id);
+                assertThat(response.status()).isEqualTo(RaceStatus.COMPLETED);
+                verify(resultRepository).existsOfficialWinnerByRaceId(
+                                id,
+                                ResultStatus.FINISHED,
+                                WINNER_POSITION);
+                verify(raceRepository).save(race);
+        }
 
-        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+        @Test
+        @DisplayName("rejects invalid draft to completed transition")
+        void rejectsInvalidDraftToCompletedTransition() {
+                UUID id = UUID.randomUUID();
+                Race race = race(RaceStatus.DRAFT);
+                race.setId(id);
 
-        assertThatThrownBy(() -> raceService.updateRaceStatus(
-                id,
-                new RaceStatusRequest(RaceStatus.COMPLETED)))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("Invalid race status transition from DRAFT to COMPLETED");
-    }
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
 
-    @Test
-    @DisplayName("cancels draft race")
-    void cancelsDraftRace() {
-        UUID id = UUID.randomUUID();
-        Race race = race(RaceStatus.DRAFT);
-        race.setId(id);
+                assertThatThrownBy(() -> raceService.updateRaceStatus(
+                                id,
+                                new RaceStatusRequest(RaceStatus.COMPLETED)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Invalid race status transition from DRAFT to COMPLETED");
+        }
 
-        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
-        when(raceRepository.save(race)).thenReturn(race);
+        @Test
+        @DisplayName("cancels draft race")
+        void cancelsDraftRace() {
+                UUID id = UUID.randomUUID();
+                User currentUser = organizer();
+                Race race = race(RaceStatus.DRAFT);
+                race.setId(id);
 
-        raceService.cancelRace(id);
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                when(raceRepository.save(race)).thenReturn(race);
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(currentUser);
 
-        assertThat(race.getStatus()).isEqualTo(RaceStatus.CANCELLED);
-        assertThat(race.getUpdatedAt()).isNotNull();
-        verify(raceRepository).save(race);
-    }
+                raceService.cancelRace(id);
 
-    @Test
-    @DisplayName("cancellation is idempotent for cancelled race")
-    void cancellationIsIdempotentForCancelledRace() {
-        UUID id = UUID.randomUUID();
-        Race race = race(RaceStatus.CANCELLED);
-        race.setId(id);
+                assertThat(race.getStatus()).isEqualTo(RaceStatus.CANCELLED);
+                assertThat(race.getUpdatedAt()).isNotNull();
 
-        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                verify(raceRepository).save(race);
+                verify(currentUserService).getOrSynchronizeCurrentUser();
+                verify(auditLogService).log(
+                                org.mockito.ArgumentMatchers.eq(currentUser),
+                                org.mockito.ArgumentMatchers.eq(AuditLogService.ACTION_RACE_CANCELLED),
+                                org.mockito.ArgumentMatchers.eq("RACE"),
+                                org.mockito.ArgumentMatchers.eq(id.toString()),
+                                org.mockito.ArgumentMatchers.eq("Race cancelled"),
+                                org.mockito.ArgumentMatchers.eq("status=DRAFT"),
+                                org.mockito.ArgumentMatchers.eq("status=CANCELLED"));
+        }
 
-        raceService.cancelRace(id);
+        @Test
+        @DisplayName("cancellation is idempotent for cancelled race")
+        void cancellationIsIdempotentForCancelledRace() {
+                UUID id = UUID.randomUUID();
+                Race race = race(RaceStatus.CANCELLED);
+                race.setId(id);
 
-        verify(raceRepository).findById(id);
-    }
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
 
-    @Test
-    @DisplayName("rejects cancellation of completed race")
-    void rejectsCancellationOfCompletedRace() {
-        UUID id = UUID.randomUUID();
-        Race race = race(RaceStatus.COMPLETED);
-        race.setId(id);
+                raceService.cancelRace(id);
 
-        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                verify(raceRepository).findById(id);
+        }
 
-        assertThatThrownBy(() -> raceService.cancelRace(id))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("Completed races cannot be cancelled");
-    }
+        @Test
+        @DisplayName("rejects cancellation of completed race")
+        void rejectsCancellationOfCompletedRace() {
+                UUID id = UUID.randomUUID();
+                Race race = race(RaceStatus.COMPLETED);
+                race.setId(id);
 
-    @Test
-    @DisplayName("rejects cancellation of in-progress race")
-    void rejectsCancellationOfInProgressRace() {
-        UUID id = UUID.randomUUID();
-        Race race = race(RaceStatus.IN_PROGRESS);
-        race.setId(id);
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
 
-        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                assertThatThrownBy(() -> raceService.cancelRace(id))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Completed races cannot be cancelled");
+        }
 
-        assertThatThrownBy(() -> raceService.cancelRace(id))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("In-progress races cannot be cancelled");
-    }
+        @Test
+        @DisplayName("rejects cancellation of in-progress race")
+        void rejectsCancellationOfInProgressRace() {
+                UUID id = UUID.randomUUID();
+                Race race = race(RaceStatus.IN_PROGRESS);
+                race.setId(id);
 
-    @Test
-    @DisplayName("rejects update of terminal race")
-    void rejectsUpdateOfTerminalRace() {
-        UUID id = UUID.randomUUID();
-        Race race = race(RaceStatus.COMPLETED);
-        race.setId(id);
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
 
-        when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                assertThatThrownBy(() -> raceService.cancelRace(id))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("In-progress races cannot be cancelled");
+        }
 
-        assertThatThrownBy(() -> raceService.updateRace(id, request()))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("Terminal races cannot be updated");
-    }
+        @Test
+        @DisplayName("rejects update of terminal race")
+        void rejectsUpdateOfTerminalRace() {
+                UUID id = UUID.randomUUID();
+                Race race = race(RaceStatus.COMPLETED);
+                race.setId(id);
 
-    @Test
-    @DisplayName("rejects invalid page size")
-    void rejectsInvalidPageSize() {
-        assertThatThrownBy(() -> raceService.getRaces(
-                null,
-                null,
-                null,
-                0,
-                101,
-                "scheduledAt,asc"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Size must be between 1 and 100");
-    }
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
 
-    @Test
-    @DisplayName("throws not found when race does not exist")
-    void throwsNotFoundWhenRaceDoesNotExist() {
-        UUID id = UUID.randomUUID();
+                assertThatThrownBy(() -> raceService.updateRace(id, request()))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Terminal races cannot be updated");
+        }
 
-        when(raceRepository.findById(id)).thenReturn(Optional.empty());
+        @Test
+        @DisplayName("rejects invalid page size")
+        void rejectsInvalidPageSize() {
+                assertThatThrownBy(() -> raceService.getRaces(
+                                null,
+                                null,
+                                null,
+                                0,
+                                101,
+                                "scheduledAt,asc"))
+                                .isInstanceOf(IllegalArgumentException.class)
+                                .hasMessage("Size must be between 1 and 100");
+        }
 
-        assertThatThrownBy(() -> raceService.getRaceById(id))
-                .isInstanceOf(NoSuchElementException.class)
-                .hasMessageContaining("Race with id");
-    }
+        @Test
+        @DisplayName("throws not found when race does not exist")
+        void throwsNotFoundWhenRaceDoesNotExist() {
+                UUID id = UUID.randomUUID();
 
-    private RaceRequest request() {
-        return new RaceRequest(
-                "The Great Mixed Race",
-                "A mixed academic race",
-                LocalDateTime.now().plusDays(5),
-                "EIA Start",
-                "EIA Finish",
-                new BigDecimal("1000.00"),
-                10,
-                RaceType.MIXED,
-                LocalDateTime.now().plusDays(4));
-    }
+                when(raceRepository.findById(id)).thenReturn(Optional.empty());
 
-    private Race race(RaceStatus status) {
-        return Race.builder()
-                .name("The Great Mixed Race")
-                .description("A mixed academic race")
-                .scheduledAt(LocalDateTime.now().plusDays(5))
-                .startLocation("EIA Start")
-                .finishLocation("EIA Finish")
-                .distanceMeters(new BigDecimal("1000.00"))
-                .maxParticipants(10)
-                .raceType(RaceType.MIXED)
-                .status(status)
-                .organizer(organizer())
-                .registrationDeadline(LocalDateTime.now().plusDays(4))
-                .createdAt(LocalDateTime.now().minusHours(1))
-                .updatedAt(LocalDateTime.now().minusMinutes(5))
-                .build();
-    }
+                assertThatThrownBy(() -> raceService.getRaceById(id))
+                                .isInstanceOf(NoSuchElementException.class)
+                                .hasMessageContaining("Race with id");
+        }
 
-    private User organizer() {
-        return User.builder()
-                .id(UUID.randomUUID())
-                .keycloakSubject("keycloak-subject")
-                .username("organizer")
-                .email("organizer@camel-racing.test")
-                .firstName("Race")
-                .lastName("Organizer")
-                .enabled(true)
-                .createdAt(LocalDateTime.now().minusDays(3))
-                .build();
-    }
+        private RaceRequest request() {
+                return new RaceRequest(
+                                "The Great Mixed Race",
+                                "A mixed academic race",
+                                LocalDateTime.now().plusDays(5),
+                                "EIA Start",
+                                "EIA Finish",
+                                new BigDecimal("1000.00"),
+                                10,
+                                RaceType.MIXED,
+                                LocalDateTime.now().plusDays(4));
+        }
+
+        private Race race(RaceStatus status) {
+                return Race.builder()
+                                .name("The Great Mixed Race")
+                                .description("A mixed academic race")
+                                .scheduledAt(LocalDateTime.now().plusDays(5))
+                                .startLocation("EIA Start")
+                                .finishLocation("EIA Finish")
+                                .distanceMeters(new BigDecimal("1000.00"))
+                                .maxParticipants(10)
+                                .raceType(RaceType.MIXED)
+                                .status(status)
+                                .organizer(organizer())
+                                .registrationDeadline(LocalDateTime.now().plusDays(4))
+                                .createdAt(LocalDateTime.now().minusHours(1))
+                                .updatedAt(LocalDateTime.now().minusMinutes(5))
+                                .build();
+        }
+
+        private User organizer() {
+                return User.builder()
+                                .id(UUID.randomUUID())
+                                .keycloakSubject("keycloak-subject")
+                                .username("organizer")
+                                .email("organizer@camel-racing.test")
+                                .firstName("Race")
+                                .lastName("Organizer")
+                                .enabled(true)
+                                .createdAt(LocalDateTime.now().minusDays(3))
+                                .build();
+        }
 }

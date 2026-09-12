@@ -6,6 +6,7 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.UUID;
 
+import com.eia.camelracing.audit.service.AuditLogService;
 import com.eia.camelracing.common.dto.PageResponse;
 import com.eia.camelracing.common.exception.ConflictException;
 import com.eia.camelracing.common.service.CurrentUserService;
@@ -51,6 +52,7 @@ public class RaceService {
     private final RaceRepository raceRepository;
     private final RaceResultRepository resultRepository;
     private final CurrentUserService currentUserService;
+    private final AuditLogService auditLogService;
 
     @Transactional
     public RaceResponse createRace(RaceRequest request) {
@@ -141,10 +143,23 @@ public class RaceService {
             throw new ConflictException("In-progress races cannot be cancelled");
         }
 
+        RaceStatus previousStatus = race.getStatus();
+
         race.setStatus(RaceStatus.CANCELLED);
         race.setUpdatedAt(LocalDateTime.now());
 
         raceRepository.save(race);
+
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+        auditLogService.log(
+                currentUser,
+                AuditLogService.ACTION_RACE_CANCELLED,
+                "RACE",
+                race.getId().toString(),
+                "Race cancelled",
+                "status=" + previousStatus,
+                "status=" + RaceStatus.CANCELLED);
     }
 
     private Race findRaceById(UUID id) {

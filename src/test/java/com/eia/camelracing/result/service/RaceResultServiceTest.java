@@ -3,6 +3,7 @@ package com.eia.camelracing.result.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.eia.camelracing.audit.service.AuditLogService;
 import com.eia.camelracing.common.exception.ConflictException;
 import com.eia.camelracing.common.service.CurrentUserService;
 import com.eia.camelracing.competitor.entity.Competitor;
@@ -81,6 +83,9 @@ class RaceResultServiceTest {
 
         @Mock
         private CurrentUserService currentUserService;
+
+        @Mock
+        private AuditLogService auditLogService;
 
         @InjectMocks
         private RaceResultService resultService;
@@ -523,6 +528,18 @@ class RaceResultServiceTest {
 
                 verify(teamRepository).save(team);
                 verify(competitorRepository, never()).save(any(Competitor.class));
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_RESULT_UPDATED),
+                                eq("RESULT"),
+                                eq(resultId.toString()),
+                                eq("Race result updated"),
+                                eq(
+                                                "finalPosition=1, completionTimeSeconds=187, penaltyTimeSeconds=0, "
+                                                                + "status=FINISHED, notes=Initial team result"),
+                                eq(
+                                                "finalPosition=2, completionTimeSeconds=205, penaltyTimeSeconds=0, "
+                                                                + "status=FINISHED, notes=Corrected team result"));
         }
 
         @Test
@@ -990,6 +1007,18 @@ class RaceResultServiceTest {
                 assertThat(result.getStatus()).isEqualTo(ResultStatus.FINISHED);
 
                 verify(competitorRepository).save(competitor);
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_RESULT_UPDATED),
+                                eq("RESULT"),
+                                eq(resultId.toString()),
+                                eq("Race result updated"),
+                                eq(
+                                                "finalPosition=2, completionTimeSeconds=220, penaltyTimeSeconds=0, "
+                                                                + "status=FINISHED, notes=Initial result"),
+                                eq(
+                                                "finalPosition=1, completionTimeSeconds=190, penaltyTimeSeconds=0, "
+                                                                + "status=FINISHED, notes=Corrected result"));
         }
 
         private void configureCreateTeamResult(

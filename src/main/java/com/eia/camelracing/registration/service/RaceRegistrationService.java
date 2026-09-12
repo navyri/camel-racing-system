@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
+import com.eia.camelracing.audit.service.AuditLogService;
 import com.eia.camelracing.common.exception.ConflictException;
 import com.eia.camelracing.common.service.CurrentUserService;
 import com.eia.camelracing.competitor.entity.Competitor;
@@ -42,8 +43,7 @@ public class RaceRegistrationService {
 
     private static final List<RegistrationStatus> CAPACITY_CONSUMING_STATUSES = List.of(
             RegistrationStatus.PENDING,
-            RegistrationStatus.APPROVED
-    );
+            RegistrationStatus.APPROVED);
 
     private final RaceRegistrationRepository registrationRepository;
     private final RaceRepository raceRepository;
@@ -51,12 +51,12 @@ public class RaceRegistrationService {
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final CurrentUserService currentUserService;
+    private final AuditLogService auditLogService;
 
     @Transactional
     public RaceRegistrationResponse createRegistration(
             UUID raceId,
-            RaceRegistrationRequest request
-    ) {
+            RaceRegistrationRequest request) {
         Race race = findRaceById(raceId);
         validateRaceOpenForRegistration(race);
 
@@ -107,48 +107,69 @@ public class RaceRegistrationService {
     @Transactional
     public RaceRegistrationResponse approveRegistration(UUID id) {
         RaceRegistration registration = findDetailedRegistrationById(id);
-        validateOrganizerPermission(
-                registration.getRace(),
-                currentUserService.getOrSynchronizeCurrentUser()
-        );
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+        validateOrganizerPermission(registration.getRace(), currentUser);
 
         if (registration.getStatus() != RegistrationStatus.PENDING) {
             throw new ConflictException("Only pending registrations can be approved");
         }
 
+        RegistrationStatus previousStatus = registration.getStatus();
         registration.setStatus(RegistrationStatus.APPROVED);
 
-        return RaceRegistrationMapper.toResponse(registrationRepository.save(registration));
+        RaceRegistration savedRegistration = registrationRepository.save(registration);
+
+        auditLogService.log(
+                currentUser,
+                AuditLogService.ACTION_REGISTRATION_APPROVED,
+                "REGISTRATION",
+                savedRegistration.getId().toString(),
+                "Registration approved",
+                "status=" + previousStatus,
+                "status=" + RegistrationStatus.APPROVED);
+
+        return RaceRegistrationMapper.toResponse(savedRegistration);
     }
 
     @Transactional
     public RaceRegistrationResponse rejectRegistration(
             UUID id,
-            RegistrationRejectRequest request
-    ) {
+            RegistrationRejectRequest request) {
         RaceRegistration registration = findDetailedRegistrationById(id);
-        validateOrganizerPermission(
-                registration.getRace(),
-                currentUserService.getOrSynchronizeCurrentUser()
-        );
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+        validateOrganizerPermission(registration.getRace(), currentUser);
 
         if (registration.getStatus() != RegistrationStatus.PENDING) {
             throw new ConflictException("Only pending registrations can be rejected");
         }
 
+        RegistrationStatus previousStatus = registration.getStatus();
         registration.setStatus(RegistrationStatus.REJECTED);
         registration.setValidationNotes(request.reason());
 
-        return RaceRegistrationMapper.toResponse(registrationRepository.save(registration));
+        RaceRegistration savedRegistration = registrationRepository.save(registration);
+
+        auditLogService.log(
+                currentUser,
+                AuditLogService.ACTION_REGISTRATION_REJECTED,
+                "REGISTRATION",
+                savedRegistration.getId().toString(),
+                "Registration rejected",
+                "status=" + previousStatus,
+                "status=" + RegistrationStatus.REJECTED
+                        + ", reason=" + savedRegistration.getValidationNotes());
+
+        return RaceRegistrationMapper.toResponse(savedRegistration);
     }
 
     @Transactional
     public void cancelRegistration(UUID id) {
         RaceRegistration registration = findDetailedRegistrationById(id);
-        validateOrganizerPermission(
-                registration.getRace(),
-                currentUserService.getOrSynchronizeCurrentUser()
-        );
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+        validateOrganizerPermission(registration.getRace(), currentUser);
 
         if (registration.getStatus() == RegistrationStatus.CANCELLED) {
             return;
@@ -159,8 +180,19 @@ public class RaceRegistrationService {
             throw new ConflictException("Only pending or approved registrations can be cancelled");
         }
 
+        RegistrationStatus previousStatus = registration.getStatus();
         registration.setStatus(RegistrationStatus.CANCELLED);
-        registrationRepository.save(registration);
+
+        RaceRegistration savedRegistration = registrationRepository.save(registration);
+
+        auditLogService.log(
+                currentUser,
+                AuditLogService.ACTION_REGISTRATION_CANCELLED,
+                "REGISTRATION",
+                savedRegistration.getId().toString(),
+                "Registration cancelled",
+                "status=" + previousStatus,
+                "status=" + RegistrationStatus.CANCELLED);
     }
 
     private void validateRaceOpenForRegistration(Race race) {
@@ -176,8 +208,7 @@ public class RaceRegistrationService {
     private void validateCapacity(Race race) {
         long occupiedCapacity = registrationRepository.countByRaceIdAndStatusIn(
                 race.getId(),
-                CAPACITY_CONSUMING_STATUSES
-        );
+                CAPACITY_CONSUMING_STATUSES);
 
         if (occupiedCapacity >= race.getMaxParticipants()) {
             throw new ConflictException("Race capacity has been reached");
@@ -193,8 +224,7 @@ public class RaceRegistrationService {
                 .existsByRaceIdAndStartingPositionAndStatusIn(
                         raceId,
                         startingPosition,
-                        CAPACITY_CONSUMING_STATUSES
-                );
+                        CAPACITY_CONSUMING_STATUSES);
 
         if (alreadyAssigned) {
             throw new ConflictException("Starting position is already assigned");
@@ -203,8 +233,7 @@ public class RaceRegistrationService {
 
     private void validateParticipantType(
             RaceType raceType,
-            RaceRegistrationRequest request
-    ) {
+            RaceRegistrationRequest request) {
         if (raceType == RaceType.INDIVIDUAL && request.teamId() != null) {
             throw new ConflictException("Individual races do not accept teams");
         }
@@ -226,8 +255,7 @@ public class RaceRegistrationService {
         if (registrationRepository.existsActiveTeamRegistrationForCompetitor(
                 race.getId(),
                 competitor.getId(),
-                CAPACITY_CONSUMING_STATUSES
-        )) {
+                CAPACITY_CONSUMING_STATUSES)) {
             throw new ConflictException("Competitor is already participating through a registered team");
         }
     }
@@ -246,8 +274,7 @@ public class RaceRegistrationService {
         long nonActiveCompetitorCount = teamMemberRepository
                 .countActiveMembersWithDifferentCompetitorStatus(
                         team.getId(),
-                        CompetitorStatus.ACTIVE
-                );
+                        CompetitorStatus.ACTIVE);
 
         if (nonActiveCompetitorCount > 0) {
             throw new ConflictException("All active team members must be active competitors");
@@ -265,8 +292,7 @@ public class RaceRegistrationService {
 
         if (!race.getOrganizer().getId().equals(currentUser.getId())) {
             throw new AccessDeniedException(
-                    "Race organizer can only manage registrations for own races"
-            );
+                    "Race organizer can only manage registrations for own races");
         }
     }
 
@@ -278,35 +304,30 @@ public class RaceRegistrationService {
         }
 
         return authentication.getAuthorities().contains(
-                new SimpleGrantedAuthority("ROLE_ADMINISTRATOR")
-        );
+                new SimpleGrantedAuthority("ROLE_ADMINISTRATOR"));
     }
 
     private Race findRaceById(UUID id) {
         return raceRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException(
-                        "Race with id " + id + " was not found"
-                ));
+                        "Race with id " + id + " was not found"));
     }
 
     private Competitor findCompetitorById(UUID id) {
         return competitorRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException(
-                        "Competitor with id " + id + " was not found"
-                ));
+                        "Competitor with id " + id + " was not found"));
     }
 
     private Team findTeamById(UUID id) {
         return teamRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException(
-                        "Team with id " + id + " was not found"
-                ));
+                        "Team with id " + id + " was not found"));
     }
 
     private RaceRegistration findDetailedRegistrationById(UUID id) {
         return registrationRepository.findDetailedById(id)
                 .orElseThrow(() -> new NoSuchElementException(
-                        "Registration with id " + id + " was not found"
-                ));
+                        "Registration with id " + id + " was not found"));
     }
 }
