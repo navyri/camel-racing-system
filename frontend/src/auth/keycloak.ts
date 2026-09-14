@@ -1,6 +1,6 @@
 import Keycloak from 'keycloak-js'
 
-const keycloakUrl = import.meta.env.VITE_KEYCLOAK_URL ?? 'http://localhost:8081'
+const keycloakUrl = import.meta.env.VITE_KEYCLOAK_URL ?? 'http://localhost:8180'
 const keycloakRealm = import.meta.env.VITE_KEYCLOAK_REALM ?? 'camel-racing'
 const keycloakClientId =
     import.meta.env.VITE_KEYCLOAK_CLIENT_ID ?? 'camel-racing-frontend'

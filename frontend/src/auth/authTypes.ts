@@ -1,4 +1,8 @@
-export const appRoles = ['ADMIN', 'USER'] as const
+export const appRoles = [
+    'ADMINISTRATOR',
+    'RACE_ORGANIZER',
+    'VIEWER',
+] as const
 
 export type AppRole = (typeof appRoles)[number]
 

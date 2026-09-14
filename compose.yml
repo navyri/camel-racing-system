@@ -65,6 +65,8 @@ services:
       KEYCLOAK_PUBLIC_URL: http://localhost:${KEYCLOAK_PORT:-8180}
       KEYCLOAK_JWKS_URI: http://keycloak:8080/realms/camel-racing/protocol/openid-connect/certs
       KEYCLOAK_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-8180}/realms/camel-racing
+      TZ: America/Bogota
+      JAVA_TOOL_OPTIONS: -Duser.timezone=America/Bogota
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     networks:

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,6 +51,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -60,6 +62,8 @@ class RaceResultServiceTest {
 
         private static final int WINNER_POSITION = 1;
         private static final int SECOND_POSITION = 2;
+        private static final int THIRD_POSITION = 3;
+        private static final int FOURTH_POSITION = 4;
 
         private static final List<ResultStatus> COMPLETED_RACE_STATUSES = List.of(
                         ResultStatus.FINISHED,
@@ -96,8 +100,8 @@ class RaceResultServiceTest {
         }
 
         @Test
-        @DisplayName("creates finished result for approved individual registration")
-        void createsFinishedResultForApprovedIndividualRegistration() {
+        @DisplayName("creates finished result and assigns automatic winner position")
+        void createsFinishedResultAndAssignsAutomaticWinnerPosition() {
                 UUID raceId = UUID.randomUUID();
                 UUID registrationId = UUID.randomUUID();
                 UUID competitorId = UUID.randomUUID();
@@ -114,40 +118,31 @@ class RaceResultServiceTest {
                                 1,
                                 organizer);
 
+                RaceResult[] savedResultHolder = new RaceResult[1];
+
                 authenticateOrganizer();
 
                 when(registrationRepository.findDetailedById(registrationId))
                                 .thenReturn(Optional.of(registration));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
                 when(resultRepository.existsByRegistrationId(registrationId)).thenReturn(false);
-                when(resultRepository.existsByRegistration_Race_IdAndFinalPositionAndStatus(
-                                raceId,
-                                WINNER_POSITION,
-                                ResultStatus.FINISHED)).thenReturn(false);
                 when(resultRepository.save(any(RaceResult.class))).thenAnswer(invocation -> {
                         RaceResult result = invocation.getArgument(0);
                         result.setId(UUID.randomUUID());
+                        savedResultHolder[0] = result;
                         return result;
                 });
-                when(resultRepository.countByCompetitorIdAndStatusIn(
-                                competitorId,
-                                COMPLETED_RACE_STATUSES)).thenReturn(1L);
-                when(resultRepository.countByCompetitorIdAndStatusAndFinalPosition(
-                                competitorId,
-                                ResultStatus.FINISHED,
-                                WINNER_POSITION)).thenReturn(1L);
-                when(resultRepository.countDefeatsByCompetitorId(
-                                competitorId,
-                                ResultStatus.FINISHED,
-                                ResultStatus.DID_NOT_FINISH,
-                                ResultStatus.DISQUALIFIED,
-                                WINNER_POSITION)).thenReturn(0L);
+                when(resultRepository.findDetailedFinishedByRaceId(
+                                raceId,
+                                ResultStatus.FINISHED))
+                                .thenAnswer(invocation -> new ArrayList<>(List.of(savedResultHolder[0])));
+                when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(competitor));
+                configureCompetitorStatistics(competitorId, 1L, 1L, 0L);
 
                 RaceResultResponse response = resultService.createResult(
                                 raceId,
                                 new RaceResultRequest(
                                                 registrationId,
-                                                WINNER_POSITION,
                                                 187L,
                                                 3L,
                                                 ResultStatus.FINISHED,
@@ -184,521 +179,134 @@ class RaceResultServiceTest {
                 assertThat(competitor.getDefeats()).isZero();
 
                 verify(competitorRepository).save(competitor);
+                verify(resultRepository).saveAll(List.of(savedResult));
         }
 
         @Test
-        @DisplayName("creates finished winner result for approved team registration")
-        void createsFinishedWinnerResultForApprovedTeamRegistration() {
+        @DisplayName("ranks finished results by time penalty recorded at and id")
+        void ranksFinishedResultsByTimePenaltyRecordedAtAndId() {
                 UUID raceId = UUID.randomUUID();
-                UUID registrationId = UUID.randomUUID();
-                UUID teamId = UUID.randomUUID();
 
                 User organizer = user("organizer");
                 Race race = race(raceId, organizer);
-                Team team = team(teamId);
-                RaceRegistration registration = registration(
-                                registrationId,
-                                race,
-                                null,
-                                team,
-                                RegistrationStatus.APPROVED,
-                                1,
-                                organizer);
 
-                configureCreateTeamResult(
-                                raceId,
-                                registrationId,
-                                team,
-                                registration,
+                Competitor firstCompetitor = competitor(
+                                UUID.fromString("00000000-0000-0000-0000-000000000001"));
+                Competitor secondCompetitor = competitor(
+                                UUID.fromString("00000000-0000-0000-0000-000000000002"));
+                Competitor thirdCompetitor = competitor(
+                                UUID.fromString("00000000-0000-0000-0000-000000000003"));
+                Competitor fourthCompetitor = competitor(
+                                UUID.fromString("00000000-0000-0000-0000-000000000004"));
+
+                RaceResult first = finishedResult(
+                                UUID.fromString("00000000-0000-0000-0000-000000000004"),
+                                registration(
+                                                UUID.randomUUID(),
+                                                race,
+                                                firstCompetitor,
+                                                null,
+                                                RegistrationStatus.APPROVED,
+                                                1,
+                                                organizer),
                                 organizer,
-                                WINNER_POSITION,
-                                ResultStatus.FINISHED,
-                                1L,
-                                0L);
+                                187,
+                                5,
+                                LocalDateTime.of(2026, 9, 14, 10, 5));
 
-                RaceResultResponse response = resultService.createResult(
-                                raceId,
-                                new RaceResultRequest(
-                                                registrationId,
-                                                WINNER_POSITION,
-                                                187L,
-                                                0L,
-                                                ResultStatus.FINISHED,
-                                                "Team victory"));
-
-                assertThat(response.id()).isNotNull();
-                assertThat(response.raceId()).isEqualTo(raceId);
-                assertThat(response.registrationId()).isEqualTo(registrationId);
-                assertThat(response.competitorId()).isNull();
-                assertThat(response.competitorName()).isNull();
-                assertThat(response.competitorNickname()).isNull();
-                assertThat(response.teamId()).isEqualTo(teamId);
-                assertThat(response.teamName()).isEqualTo(team.getName());
-                assertThat(response.finalPosition()).isEqualTo(WINNER_POSITION);
-                assertThat(response.status()).isEqualTo(ResultStatus.FINISHED);
-
-                assertThat(team.getVictories()).isEqualTo(1);
-                assertThat(team.getDefeats()).isZero();
-
-                verifyTeamStatisticsSaved(team);
-        }
-
-        @Test
-        @DisplayName("creates finished non-winner result and recalculates team defeat")
-        void createsFinishedNonWinnerResultAndRecalculatesTeamDefeat() {
-                UUID raceId = UUID.randomUUID();
-                UUID registrationId = UUID.randomUUID();
-                UUID teamId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race race = race(raceId, organizer);
-                Team team = team(teamId);
-                RaceRegistration registration = registration(
-                                registrationId,
-                                race,
-                                null,
-                                team,
-                                RegistrationStatus.APPROVED,
-                                2,
-                                organizer);
-
-                configureCreateTeamResult(
-                                raceId,
-                                registrationId,
-                                team,
-                                registration,
+                RaceResult second = finishedResult(
+                                UUID.fromString("00000000-0000-0000-0000-000000000003"),
+                                registration(
+                                                UUID.randomUUID(),
+                                                race,
+                                                secondCompetitor,
+                                                null,
+                                                RegistrationStatus.APPROVED,
+                                                2,
+                                                organizer),
                                 organizer,
-                                SECOND_POSITION,
-                                ResultStatus.FINISHED,
-                                0L,
-                                1L);
+                                187,
+                                10,
+                                LocalDateTime.of(2026, 9, 14, 10, 4));
 
-                RaceResultResponse response = resultService.createResult(
-                                raceId,
-                                new RaceResultRequest(
-                                                registrationId,
-                                                SECOND_POSITION,
-                                                201L,
-                                                0L,
-                                                ResultStatus.FINISHED,
-                                                "Team second place"));
-
-                assertThat(response.teamId()).isEqualTo(teamId);
-                assertThat(response.finalPosition()).isEqualTo(SECOND_POSITION);
-                assertThat(response.status()).isEqualTo(ResultStatus.FINISHED);
-
-                assertThat(team.getVictories()).isZero();
-                assertThat(team.getDefeats()).isEqualTo(1);
-
-                verifyTeamStatisticsSaved(team);
-        }
-
-        @Test
-        @DisplayName("creates did not finish result and recalculates team defeat")
-        void createsDidNotFinishResultAndRecalculatesTeamDefeat() {
-                UUID raceId = UUID.randomUUID();
-                UUID registrationId = UUID.randomUUID();
-                UUID teamId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race race = race(raceId, organizer);
-                Team team = team(teamId);
-                RaceRegistration registration = registration(
-                                registrationId,
-                                race,
-                                null,
-                                team,
-                                RegistrationStatus.APPROVED,
-                                2,
-                                organizer);
-
-                configureCreateTeamResult(
-                                raceId,
-                                registrationId,
-                                team,
-                                registration,
+                RaceResult third = finishedResult(
+                                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                                registration(
+                                                UUID.randomUUID(),
+                                                race,
+                                                thirdCompetitor,
+                                                null,
+                                                RegistrationStatus.APPROVED,
+                                                3,
+                                                organizer),
                                 organizer,
-                                null,
-                                ResultStatus.DID_NOT_FINISH,
-                                0L,
-                                1L);
+                                188,
+                                0,
+                                LocalDateTime.of(2026, 9, 14, 10, 3));
 
-                RaceResultResponse response = resultService.createResult(
-                                raceId,
-                                new RaceResultRequest(
-                                                registrationId,
-                                                99,
-                                                500L,
-                                                10L,
-                                                ResultStatus.DID_NOT_FINISH,
-                                                "Team did not finish"));
-
-                assertThat(response.teamId()).isEqualTo(teamId);
-                assertThat(response.finalPosition()).isNull();
-                assertThat(response.completionTimeSeconds()).isZero();
-                assertThat(response.penaltyTimeSeconds()).isZero();
-                assertThat(response.status()).isEqualTo(ResultStatus.DID_NOT_FINISH);
-
-                assertThat(team.getVictories()).isZero();
-                assertThat(team.getDefeats()).isEqualTo(1);
-
-                verifyTeamStatisticsSaved(team);
-        }
-
-        @Test
-        @DisplayName("creates disqualified result and recalculates team defeat")
-        void createsDisqualifiedResultAndRecalculatesTeamDefeat() {
-                UUID raceId = UUID.randomUUID();
-                UUID registrationId = UUID.randomUUID();
-                UUID teamId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race race = race(raceId, organizer);
-                Team team = team(teamId);
-                RaceRegistration registration = registration(
-                                registrationId,
-                                race,
-                                null,
-                                team,
-                                RegistrationStatus.APPROVED,
-                                2,
-                                organizer);
-
-                configureCreateTeamResult(
-                                raceId,
-                                registrationId,
-                                team,
-                                registration,
+                RaceResult fourth = finishedResult(
+                                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                                registration(
+                                                UUID.randomUUID(),
+                                                race,
+                                                fourthCompetitor,
+                                                null,
+                                                RegistrationStatus.APPROVED,
+                                                4,
+                                                organizer),
                                 organizer,
-                                null,
-                                ResultStatus.DISQUALIFIED,
-                                0L,
-                                1L);
-
-                RaceResultResponse response = resultService.createResult(
-                                raceId,
-                                new RaceResultRequest(
-                                                registrationId,
-                                                99,
-                                                500L,
-                                                10L,
-                                                ResultStatus.DISQUALIFIED,
-                                                "Team disqualified"));
-
-                assertThat(response.teamId()).isEqualTo(teamId);
-                assertThat(response.finalPosition()).isNull();
-                assertThat(response.completionTimeSeconds()).isZero();
-                assertThat(response.penaltyTimeSeconds()).isZero();
-                assertThat(response.status()).isEqualTo(ResultStatus.DISQUALIFIED);
-
-                assertThat(team.getVictories()).isZero();
-                assertThat(team.getDefeats()).isEqualTo(1);
-
-                verifyTeamStatisticsSaved(team);
-        }
-
-        @Test
-        @DisplayName("creates did not start result without changing team statistics")
-        void createsDidNotStartResultWithoutChangingTeamStatistics() {
-                UUID raceId = UUID.randomUUID();
-                UUID registrationId = UUID.randomUUID();
-                UUID teamId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race race = race(raceId, organizer);
-                Team team = team(teamId);
-                team.setVictories(4);
-                team.setDefeats(3);
-                RaceRegistration registration = registration(
-                                registrationId,
-                                race,
-                                null,
-                                team,
-                                RegistrationStatus.APPROVED,
-                                2,
-                                organizer);
-
-                configureCreateTeamResult(
-                                raceId,
-                                registrationId,
-                                team,
-                                registration,
-                                organizer,
-                                null,
-                                ResultStatus.DID_NOT_START,
-                                4L,
-                                3L);
-
-                RaceResultResponse response = resultService.createResult(
-                                raceId,
-                                new RaceResultRequest(
-                                                registrationId,
-                                                WINNER_POSITION,
-                                                500L,
-                                                10L,
-                                                ResultStatus.DID_NOT_START,
-                                                "Team did not start"));
-
-                assertThat(response.teamId()).isEqualTo(teamId);
-                assertThat(response.finalPosition()).isNull();
-                assertThat(response.completionTimeSeconds()).isZero();
-                assertThat(response.penaltyTimeSeconds()).isZero();
-                assertThat(response.status()).isEqualTo(ResultStatus.DID_NOT_START);
-
-                assertThat(team.getVictories()).isEqualTo(4);
-                assertThat(team.getDefeats()).isEqualTo(3);
-
-                verifyTeamStatisticsSaved(team);
-        }
-
-        @Test
-        @DisplayName("updates team result and replaces statistics with recalculated values")
-        void updatesTeamResultAndReplacesStatisticsWithRecalculatedValues() {
-                UUID resultId = UUID.randomUUID();
-                UUID raceId = UUID.randomUUID();
-                UUID registrationId = UUID.randomUUID();
-                UUID teamId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race race = race(raceId, organizer);
-                Team team = team(teamId);
-                team.setVictories(3);
-                team.setDefeats(1);
-                RaceRegistration registration = registration(
-                                registrationId,
-                                race,
-                                null,
-                                team,
-                                RegistrationStatus.APPROVED,
-                                1,
-                                organizer);
-                RaceResult result = RaceResult.builder()
-                                .id(resultId)
-                                .registration(registration)
-                                .startingPosition(1)
-                                .finalPosition(WINNER_POSITION)
-                                .completionTime(Duration.ofSeconds(187))
-                                .penaltyTime(Duration.ZERO)
-                                .status(ResultStatus.FINISHED)
-                                .notes("Initial team result")
-                                .recordedBy(organizer)
-                                .recordedAt(LocalDateTime.now().minusMinutes(5))
-                                .build();
+                                187,
+                                5,
+                                LocalDateTime.of(2026, 9, 14, 10, 4));
 
                 authenticateOrganizer();
 
-                when(resultRepository.findDetailedById(resultId)).thenReturn(Optional.of(result));
+                when(resultRepository.findDetailedById(first.getId()))
+                                .thenReturn(Optional.of(first));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(resultRepository.existsByRegistration_Race_IdAndFinalPositionAndStatusAndIdNot(
+                when(resultRepository.save(first)).thenReturn(first);
+                when(resultRepository.findDetailedFinishedByRaceId(
                                 raceId,
-                                SECOND_POSITION,
-                                ResultStatus.FINISHED,
-                                resultId)).thenReturn(false);
-                when(resultRepository.save(result)).thenReturn(result);
-                when(resultRepository.countVictoriesByTeamId(
-                                teamId,
-                                ResultStatus.FINISHED,
-                                WINNER_POSITION)).thenReturn(2L);
-                when(resultRepository.countDefeatsByTeamId(
-                                teamId,
-                                ResultStatus.FINISHED,
-                                ResultStatus.DID_NOT_FINISH,
-                                ResultStatus.DISQUALIFIED,
-                                WINNER_POSITION)).thenReturn(4L);
+                                ResultStatus.FINISHED)).thenReturn(
+                                                new ArrayList<>(List.of(second, third, first, fourth)));
+
+                when(competitorRepository.findById(firstCompetitor.getId()))
+                                .thenReturn(Optional.of(firstCompetitor));
+                when(competitorRepository.findById(secondCompetitor.getId()))
+                                .thenReturn(Optional.of(secondCompetitor));
+                when(competitorRepository.findById(thirdCompetitor.getId()))
+                                .thenReturn(Optional.of(thirdCompetitor));
+                when(competitorRepository.findById(fourthCompetitor.getId()))
+                                .thenReturn(Optional.of(fourthCompetitor));
+
+                configureCompetitorStatistics(firstCompetitor.getId(), 1L, 0L, 1L);
+                configureCompetitorStatistics(secondCompetitor.getId(), 1L, 0L, 1L);
+                configureCompetitorStatistics(thirdCompetitor.getId(), 1L, 0L, 1L);
+                configureCompetitorStatistics(fourthCompetitor.getId(), 1L, 1L, 0L);
 
                 RaceResultResponse response = resultService.updateResult(
-                                resultId,
+                                first.getId(),
                                 new RaceResultUpdateRequest(
-                                                SECOND_POSITION,
-                                                205L,
-                                                0L,
+                                                187L,
+                                                5L,
                                                 ResultStatus.FINISHED,
-                                                "Corrected team result"));
+                                                "Recalculated"));
 
-                assertThat(response.registrationId()).isEqualTo(registrationId);
-                assertThat(response.competitorId()).isNull();
-                assertThat(response.teamId()).isEqualTo(teamId);
                 assertThat(response.finalPosition()).isEqualTo(SECOND_POSITION);
-                assertThat(response.completionTimeSeconds()).isEqualTo(205L);
-                assertThat(response.status()).isEqualTo(ResultStatus.FINISHED);
-                assertThat(response.notes()).isEqualTo("Corrected team result");
+                assertThat(fourth.getFinalPosition()).isEqualTo(WINNER_POSITION);
+                assertThat(first.getFinalPosition()).isEqualTo(SECOND_POSITION);
+                assertThat(second.getFinalPosition()).isEqualTo(THIRD_POSITION);
+                assertThat(third.getFinalPosition()).isEqualTo(FOURTH_POSITION);
 
-                assertThat(team.getVictories()).isEqualTo(2);
-                assertThat(team.getDefeats()).isEqualTo(4);
-
-                verify(teamRepository).save(team);
-                verify(competitorRepository, never()).save(any(Competitor.class));
-                verify(auditLogService).log(
-                                eq(organizer),
-                                eq(AuditLogService.ACTION_RESULT_UPDATED),
-                                eq("RESULT"),
-                                eq(resultId.toString()),
-                                eq("Race result updated"),
-                                eq(
-                                                "finalPosition=1, completionTimeSeconds=187, penaltyTimeSeconds=0, "
-                                                                + "status=FINISHED, notes=Initial team result"),
-                                eq(
-                                                "finalPosition=2, completionTimeSeconds=205, penaltyTimeSeconds=0, "
-                                                                + "status=FINISHED, notes=Corrected team result"));
+                verify(resultRepository).saveAll(List.of(fourth, first, second, third));
+                verify(competitorRepository).save(firstCompetitor);
+                verify(competitorRepository).save(secondCompetitor);
+                verify(competitorRepository).save(thirdCompetitor);
+                verify(competitorRepository).save(fourthCompetitor);
         }
 
         @Test
-        @DisplayName("rejects result when registration does not belong to requested race")
-        void rejectsResultWhenRegistrationDoesNotBelongToRequestedRace() {
-                UUID requestedRaceId = UUID.randomUUID();
-                UUID registrationRaceId = UUID.randomUUID();
-                UUID registrationId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race registrationRace = race(registrationRaceId, organizer);
-                RaceRegistration registration = registration(
-                                registrationId,
-                                registrationRace,
-                                competitor(UUID.randomUUID()),
-                                null,
-                                RegistrationStatus.APPROVED,
-                                1,
-                                organizer);
-
-                when(registrationRepository.findDetailedById(registrationId))
-                                .thenReturn(Optional.of(registration));
-
-                assertThatThrownBy(() -> resultService.createResult(
-                                requestedRaceId,
-                                new RaceResultRequest(
-                                                registrationId,
-                                                WINNER_POSITION,
-                                                187L,
-                                                0L,
-                                                ResultStatus.FINISHED,
-                                                null)))
-                                .isInstanceOf(ConflictException.class)
-                                .hasMessage("Registration does not belong to the requested race");
-
-                verify(currentUserService, never()).getOrSynchronizeCurrentUser();
-                verify(resultRepository, never()).save(any(RaceResult.class));
-        }
-
-        @Test
-        @DisplayName("rejects result when race is not in progress")
-        void rejectsResultWhenRaceIsNotInProgress() {
-                UUID raceId = UUID.randomUUID();
-                UUID registrationId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race race = race(raceId, organizer);
-                race.setStatus(RaceStatus.CLOSED_FOR_REGISTRATION);
-                RaceRegistration registration = registration(
-                                registrationId,
-                                race,
-                                competitor(UUID.randomUUID()),
-                                null,
-                                RegistrationStatus.APPROVED,
-                                1,
-                                organizer);
-
-                when(registrationRepository.findDetailedById(registrationId))
-                                .thenReturn(Optional.of(registration));
-
-                assertThatThrownBy(() -> resultService.createResult(
-                                raceId,
-                                new RaceResultRequest(
-                                                registrationId,
-                                                WINNER_POSITION,
-                                                187L,
-                                                0L,
-                                                ResultStatus.FINISHED,
-                                                null)))
-                                .isInstanceOf(ConflictException.class)
-                                .hasMessage("Results can only be recorded for an in-progress race");
-
-                verify(currentUserService, never()).getOrSynchronizeCurrentUser();
-                verify(resultRepository, never()).save(any(RaceResult.class));
-        }
-
-        @Test
-        @DisplayName("rejects result for non-approved registration")
-        void rejectsResultForNonApprovedRegistration() {
-                UUID raceId = UUID.randomUUID();
-                UUID registrationId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race race = race(raceId, organizer);
-                RaceRegistration registration = registration(
-                                registrationId,
-                                race,
-                                competitor(UUID.randomUUID()),
-                                null,
-                                RegistrationStatus.PENDING,
-                                1,
-                                organizer);
-
-                authenticateOrganizer();
-
-                when(registrationRepository.findDetailedById(registrationId))
-                                .thenReturn(Optional.of(registration));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-
-                assertThatThrownBy(() -> resultService.createResult(
-                                raceId,
-                                new RaceResultRequest(
-                                                registrationId,
-                                                WINNER_POSITION,
-                                                187L,
-                                                0L,
-                                                ResultStatus.FINISHED,
-                                                null)))
-                                .isInstanceOf(ConflictException.class)
-                                .hasMessage("Only approved registrations can receive results");
-
-                verify(resultRepository, never()).save(any(RaceResult.class));
-        }
-
-        @Test
-        @DisplayName("rejects second official winner in the same race")
-        void rejectsSecondOfficialWinnerInTheSameRace() {
-                UUID raceId = UUID.randomUUID();
-                UUID registrationId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race race = race(raceId, organizer);
-                RaceRegistration registration = registration(
-                                registrationId,
-                                race,
-                                competitor(UUID.randomUUID()),
-                                null,
-                                RegistrationStatus.APPROVED,
-                                1,
-                                organizer);
-
-                authenticateOrganizer();
-
-                when(registrationRepository.findDetailedById(registrationId))
-                                .thenReturn(Optional.of(registration));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(resultRepository.existsByRegistrationId(registrationId)).thenReturn(false);
-                when(resultRepository.existsByRegistration_Race_IdAndFinalPositionAndStatus(
-                                raceId,
-                                WINNER_POSITION,
-                                ResultStatus.FINISHED)).thenReturn(true);
-
-                assertThatThrownBy(() -> resultService.createResult(
-                                raceId,
-                                new RaceResultRequest(
-                                                registrationId,
-                                                WINNER_POSITION,
-                                                187L,
-                                                0L,
-                                                ResultStatus.FINISHED,
-                                                null)))
-                                .isInstanceOf(ConflictException.class)
-                                .hasMessage("Final position is already assigned to another finished result");
-
-                verify(resultRepository, never()).save(any(RaceResult.class));
-        }
-
-        @Test
-        @DisplayName("normalizes non-finished result values")
+        @DisplayName("normalizes non finished result values")
         void normalizesNonFinishedResultValues() {
                 UUID raceId = UUID.randomUUID();
                 UUID registrationId = UUID.randomUUID();
@@ -727,25 +335,16 @@ class RaceResultServiceTest {
                         result.setId(UUID.randomUUID());
                         return result;
                 });
-                when(resultRepository.countByCompetitorIdAndStatusIn(
-                                competitorId,
-                                COMPLETED_RACE_STATUSES)).thenReturn(1L);
-                when(resultRepository.countByCompetitorIdAndStatusAndFinalPosition(
-                                competitorId,
-                                ResultStatus.FINISHED,
-                                WINNER_POSITION)).thenReturn(0L);
-                when(resultRepository.countDefeatsByCompetitorId(
-                                competitorId,
-                                ResultStatus.FINISHED,
-                                ResultStatus.DID_NOT_FINISH,
-                                ResultStatus.DISQUALIFIED,
-                                WINNER_POSITION)).thenReturn(1L);
+                when(resultRepository.findDetailedFinishedByRaceId(
+                                raceId,
+                                ResultStatus.FINISHED)).thenReturn(new ArrayList<>());
+                when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(competitor));
+                configureCompetitorStatistics(competitorId, 1L, 0L, 1L);
 
                 RaceResultResponse response = resultService.createResult(
                                 raceId,
                                 new RaceResultRequest(
                                                 registrationId,
-                                                99,
                                                 999L,
                                                 5L,
                                                 ResultStatus.DISQUALIFIED,
@@ -795,25 +394,16 @@ class RaceResultServiceTest {
                         result.setId(UUID.randomUUID());
                         return result;
                 });
-                when(resultRepository.countByCompetitorIdAndStatusIn(
-                                competitorId,
-                                COMPLETED_RACE_STATUSES)).thenReturn(4L);
-                when(resultRepository.countByCompetitorIdAndStatusAndFinalPosition(
-                                competitorId,
-                                ResultStatus.FINISHED,
-                                WINNER_POSITION)).thenReturn(1L);
-                when(resultRepository.countDefeatsByCompetitorId(
-                                competitorId,
-                                ResultStatus.FINISHED,
-                                ResultStatus.DID_NOT_FINISH,
-                                ResultStatus.DISQUALIFIED,
-                                WINNER_POSITION)).thenReturn(3L);
+                when(resultRepository.findDetailedFinishedByRaceId(
+                                raceId,
+                                ResultStatus.FINISHED)).thenReturn(new ArrayList<>());
+                when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(competitor));
+                configureCompetitorStatistics(competitorId, 4L, 1L, 3L);
 
                 RaceResultResponse response = resultService.createResult(
                                 raceId,
                                 new RaceResultRequest(
                                                 registrationId,
-                                                WINNER_POSITION,
                                                 100L,
                                                 5L,
                                                 ResultStatus.DID_NOT_START,
@@ -828,6 +418,153 @@ class RaceResultServiceTest {
                 assertThat(competitor.getVictories()).isEqualTo(1);
                 assertThat(competitor.getDefeats()).isEqualTo(3);
                 verify(competitorRepository).save(competitor);
+        }
+
+        @Test
+        @DisplayName("rejects result when registration does not belong to requested race")
+        void rejectsResultWhenRegistrationDoesNotBelongToRequestedRace() {
+                UUID requestedRaceId = UUID.randomUUID();
+                UUID registrationRaceId = UUID.randomUUID();
+                UUID registrationId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race registrationRace = race(registrationRaceId, organizer);
+                RaceRegistration registration = registration(
+                                registrationId,
+                                registrationRace,
+                                competitor(UUID.randomUUID()),
+                                null,
+                                RegistrationStatus.APPROVED,
+                                1,
+                                organizer);
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+
+                assertThatThrownBy(() -> resultService.createResult(
+                                requestedRaceId,
+                                new RaceResultRequest(
+                                                registrationId,
+                                                187L,
+                                                0L,
+                                                ResultStatus.FINISHED,
+                                                null)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Registration does not belong to the requested race");
+
+                verify(currentUserService, never()).getOrSynchronizeCurrentUser();
+                verify(resultRepository, never()).save(any(RaceResult.class));
+        }
+
+        @Test
+        @DisplayName("rejects result when race is not in progress")
+        void rejectsResultWhenRaceIsNotInProgress() {
+                UUID raceId = UUID.randomUUID();
+                UUID registrationId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer);
+                race.setStatus(RaceStatus.CLOSED_FOR_REGISTRATION);
+                RaceRegistration registration = registration(
+                                registrationId,
+                                race,
+                                competitor(UUID.randomUUID()),
+                                null,
+                                RegistrationStatus.APPROVED,
+                                1,
+                                organizer);
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+
+                assertThatThrownBy(() -> resultService.createResult(
+                                raceId,
+                                new RaceResultRequest(
+                                                registrationId,
+                                                187L,
+                                                0L,
+                                                ResultStatus.FINISHED,
+                                                null)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Results can only be recorded for an in-progress race");
+
+                verify(currentUserService, never()).getOrSynchronizeCurrentUser();
+                verify(resultRepository, never()).save(any(RaceResult.class));
+        }
+
+        @Test
+        @DisplayName("rejects result for non approved registration")
+        void rejectsResultForNonApprovedRegistration() {
+                UUID raceId = UUID.randomUUID();
+                UUID registrationId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer);
+                RaceRegistration registration = registration(
+                                registrationId,
+                                race,
+                                competitor(UUID.randomUUID()),
+                                null,
+                                RegistrationStatus.PENDING,
+                                1,
+                                organizer);
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+
+                assertThatThrownBy(() -> resultService.createResult(
+                                raceId,
+                                new RaceResultRequest(
+                                                registrationId,
+                                                187L,
+                                                0L,
+                                                ResultStatus.FINISHED,
+                                                null)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Only approved registrations can receive results");
+
+                verify(resultRepository, never()).save(any(RaceResult.class));
+        }
+
+        @Test
+        @DisplayName("rejects duplicate result for registration")
+        void rejectsDuplicateResultForRegistration() {
+                UUID raceId = UUID.randomUUID();
+                UUID registrationId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer);
+                RaceRegistration registration = registration(
+                                registrationId,
+                                race,
+                                competitor(UUID.randomUUID()),
+                                null,
+                                RegistrationStatus.APPROVED,
+                                1,
+                                organizer);
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(resultRepository.existsByRegistrationId(registrationId)).thenReturn(true);
+
+                assertThatThrownBy(() -> resultService.createResult(
+                                raceId,
+                                new RaceResultRequest(
+                                                registrationId,
+                                                187L,
+                                                0L,
+                                                ResultStatus.FINISHED,
+                                                null)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Registration already has an official result");
+
+                verify(resultRepository, never()).save(any(RaceResult.class));
         }
 
         @Test
@@ -850,40 +587,31 @@ class RaceResultServiceTest {
                                 1,
                                 ownerOrganizer);
 
+                RaceResult[] savedResultHolder = new RaceResult[1];
+
                 authenticateAdministrator();
 
                 when(registrationRepository.findDetailedById(registrationId))
                                 .thenReturn(Optional.of(registration));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(administrator);
                 when(resultRepository.existsByRegistrationId(registrationId)).thenReturn(false);
-                when(resultRepository.existsByRegistration_Race_IdAndFinalPositionAndStatus(
-                                raceId,
-                                WINNER_POSITION,
-                                ResultStatus.FINISHED)).thenReturn(false);
                 when(resultRepository.save(any(RaceResult.class))).thenAnswer(invocation -> {
                         RaceResult result = invocation.getArgument(0);
                         result.setId(UUID.randomUUID());
+                        savedResultHolder[0] = result;
                         return result;
                 });
-                when(resultRepository.countByCompetitorIdAndStatusIn(
-                                competitorId,
-                                COMPLETED_RACE_STATUSES)).thenReturn(1L);
-                when(resultRepository.countByCompetitorIdAndStatusAndFinalPosition(
-                                competitorId,
-                                ResultStatus.FINISHED,
-                                WINNER_POSITION)).thenReturn(1L);
-                when(resultRepository.countDefeatsByCompetitorId(
-                                competitorId,
-                                ResultStatus.FINISHED,
-                                ResultStatus.DID_NOT_FINISH,
-                                ResultStatus.DISQUALIFIED,
-                                WINNER_POSITION)).thenReturn(0L);
+                when(resultRepository.findDetailedFinishedByRaceId(
+                                raceId,
+                                ResultStatus.FINISHED))
+                                .thenAnswer(invocation -> new ArrayList<>(List.of(savedResultHolder[0])));
+                when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(competitor));
+                configureCompetitorStatistics(competitorId, 1L, 1L, 0L);
 
                 RaceResultResponse response = resultService.createResult(
                                 raceId,
                                 new RaceResultRequest(
                                                 registrationId,
-                                                WINNER_POSITION,
                                                 180L,
                                                 0L,
                                                 ResultStatus.FINISHED,
@@ -921,20 +649,19 @@ class RaceResultServiceTest {
                                 raceId,
                                 new RaceResultRequest(
                                                 registrationId,
-                                                WINNER_POSITION,
                                                 187L,
                                                 0L,
                                                 ResultStatus.FINISHED,
                                                 null)))
-                                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class)
+                                .isInstanceOf(AccessDeniedException.class)
                                 .hasMessage("Race organizer can only manage results for own races");
 
                 verify(resultRepository, never()).save(any(RaceResult.class));
         }
 
         @Test
-        @DisplayName("updates result without changing registration")
-        void updatesResultWithoutChangingRegistration() {
+        @DisplayName("updates result and recalculates automatic position")
+        void updatesResultAndRecalculatesAutomaticPosition() {
                 UUID resultId = UUID.randomUUID();
                 UUID raceId = UUID.randomUUID();
                 UUID registrationId = UUID.randomUUID();
@@ -955,7 +682,7 @@ class RaceResultServiceTest {
                                 .id(resultId)
                                 .registration(registration)
                                 .startingPosition(1)
-                                .finalPosition(2)
+                                .finalPosition(SECOND_POSITION)
                                 .completionTime(Duration.ofSeconds(220))
                                 .penaltyTime(Duration.ZERO)
                                 .status(ResultStatus.FINISHED)
@@ -968,30 +695,16 @@ class RaceResultServiceTest {
 
                 when(resultRepository.findDetailedById(resultId)).thenReturn(Optional.of(result));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(resultRepository.existsByRegistration_Race_IdAndFinalPositionAndStatusAndIdNot(
-                                raceId,
-                                WINNER_POSITION,
-                                ResultStatus.FINISHED,
-                                resultId)).thenReturn(false);
                 when(resultRepository.save(result)).thenReturn(result);
-                when(resultRepository.countByCompetitorIdAndStatusIn(
-                                competitorId,
-                                COMPLETED_RACE_STATUSES)).thenReturn(1L);
-                when(resultRepository.countByCompetitorIdAndStatusAndFinalPosition(
-                                competitorId,
-                                ResultStatus.FINISHED,
-                                WINNER_POSITION)).thenReturn(1L);
-                when(resultRepository.countDefeatsByCompetitorId(
-                                competitorId,
-                                ResultStatus.FINISHED,
-                                ResultStatus.DID_NOT_FINISH,
-                                ResultStatus.DISQUALIFIED,
-                                WINNER_POSITION)).thenReturn(0L);
+                when(resultRepository.findDetailedFinishedByRaceId(
+                                raceId,
+                                ResultStatus.FINISHED)).thenReturn(new ArrayList<>(List.of(result)));
+                when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(competitor));
+                configureCompetitorStatistics(competitorId, 1L, 1L, 0L);
 
                 RaceResultResponse response = resultService.updateResult(
                                 resultId,
                                 new RaceResultUpdateRequest(
-                                                WINNER_POSITION,
                                                 190L,
                                                 0L,
                                                 ResultStatus.FINISHED,
@@ -1021,49 +734,62 @@ class RaceResultServiceTest {
                                                                 + "status=FINISHED, notes=Corrected result"));
         }
 
-        private void configureCreateTeamResult(
-                        UUID raceId,
-                        UUID registrationId,
-                        Team team,
-                        RaceRegistration registration,
-                        User organizer,
-                        Integer finalPosition,
-                        ResultStatus status,
+        private void configureCompetitorStatistics(
+                        UUID competitorId,
+                        long completedRaces,
                         long victories,
                         long defeats) {
-                authenticateOrganizer();
-
-                when(registrationRepository.findDetailedById(registrationId))
-                                .thenReturn(Optional.of(registration));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(resultRepository.existsByRegistrationId(registrationId)).thenReturn(false);
-                when(resultRepository.save(any(RaceResult.class))).thenAnswer(invocation -> {
-                        RaceResult result = invocation.getArgument(0);
-                        result.setId(UUID.randomUUID());
-                        return result;
-                });
-                when(resultRepository.countVictoriesByTeamId(
-                                team.getId(),
+                when(resultRepository.countByCompetitorIdAndStatusIn(
+                                competitorId,
+                                COMPLETED_RACE_STATUSES)).thenReturn(completedRaces);
+                when(resultRepository.countByCompetitorIdAndStatusAndFinalPosition(
+                                competitorId,
                                 ResultStatus.FINISHED,
                                 WINNER_POSITION)).thenReturn(victories);
-                when(resultRepository.countDefeatsByTeamId(
-                                team.getId(),
+                when(resultRepository.countDefeatsByCompetitorId(
+                                competitorId,
                                 ResultStatus.FINISHED,
                                 ResultStatus.DID_NOT_FINISH,
                                 ResultStatus.DISQUALIFIED,
                                 WINNER_POSITION)).thenReturn(defeats);
-
-                if (status == ResultStatus.FINISHED) {
-                        when(resultRepository.existsByRegistration_Race_IdAndFinalPositionAndStatus(
-                                        raceId,
-                                        finalPosition,
-                                        ResultStatus.FINISHED)).thenReturn(false);
-                }
         }
 
-        private void verifyTeamStatisticsSaved(Team team) {
-                verify(teamRepository).save(team);
-                verify(competitorRepository, never()).save(any(Competitor.class));
+        private RaceResult finishedResult(
+                        UUID id,
+                        RaceRegistration registration,
+                        User organizer,
+                        long completionTimeSeconds,
+                        long penaltyTimeSeconds,
+                        LocalDateTime recordedAt) {
+                return RaceResult.builder()
+                                .id(id)
+                                .registration(registration)
+                                .startingPosition(registration.getStartingPosition())
+                                .finalPosition(null)
+                                .completionTime(Duration.ofSeconds(completionTimeSeconds))
+                                .penaltyTime(Duration.ofSeconds(penaltyTimeSeconds))
+                                .status(ResultStatus.FINISHED)
+                                .notes(null)
+                                .recordedBy(organizer)
+                                .recordedAt(recordedAt)
+                                .build();
+        }
+
+        private void configureTeamStatistics(
+                        UUID teamId,
+                        long victories,
+                        long defeats) {
+                when(teamRepository.findById(teamId)).thenReturn(Optional.of(team(teamId)));
+                when(resultRepository.countVictoriesByTeamId(
+                                teamId,
+                                ResultStatus.FINISHED,
+                                WINNER_POSITION)).thenReturn(victories);
+                when(resultRepository.countDefeatsByTeamId(
+                                teamId,
+                                ResultStatus.FINISHED,
+                                ResultStatus.DID_NOT_FINISH,
+                                ResultStatus.DISQUALIFIED,
+                                WINNER_POSITION)).thenReturn(defeats);
         }
 
         private void authenticateOrganizer() {

@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import com.eia.camelracing.registration.dto.RaceRegistrationRequest;
 import com.eia.camelracing.registration.dto.RaceRegistrationResponse;
+import com.eia.camelracing.registration.dto.RegistrationApprovalRequest;
 import com.eia.camelracing.registration.dto.RegistrationRejectRequest;
 import com.eia.camelracing.registration.service.RaceRegistrationService;
 
@@ -79,17 +80,19 @@ public class RaceRegistrationController {
         }
 
         @PatchMapping("/api/registrations/{id}/approve")
-        @Operation(summary = "Approve a pending registration")
+        @Operation(summary = "Approve a pending registration and assign its starting position")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Registration approved"),
+                        @ApiResponse(responseCode = "400", description = "Invalid starting position"),
                         @ApiResponse(responseCode = "401", description = "Authentication required"),
                         @ApiResponse(responseCode = "403", description = "Insufficient permissions"),
                         @ApiResponse(responseCode = "404", description = "Registration not found"),
-                        @ApiResponse(responseCode = "409", description = "Invalid registration state")
+                        @ApiResponse(responseCode = "409", description = "Registration or race capacity conflict")
         })
         public ResponseEntity<RaceRegistrationResponse> approveRegistration(
-                        @PathVariable UUID id) {
-                return ResponseEntity.ok(registrationService.approveRegistration(id));
+                        @PathVariable UUID id,
+                        @Valid @RequestBody RegistrationApprovalRequest request) {
+                return ResponseEntity.ok(registrationService.approveRegistration(id, request));
         }
 
         @PatchMapping("/api/registrations/{id}/reject")

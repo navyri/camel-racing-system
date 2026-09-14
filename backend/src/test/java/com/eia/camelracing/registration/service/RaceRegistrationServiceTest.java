@@ -28,6 +28,7 @@ import com.eia.camelracing.race.entity.RaceType;
 import com.eia.camelracing.race.repository.RaceRepository;
 import com.eia.camelracing.registration.dto.RaceRegistrationRequest;
 import com.eia.camelracing.registration.dto.RaceRegistrationResponse;
+import com.eia.camelracing.registration.dto.RegistrationApprovalRequest;
 import com.eia.camelracing.registration.dto.RegistrationRejectRequest;
 import com.eia.camelracing.registration.entity.RaceRegistration;
 import com.eia.camelracing.registration.entity.RegistrationStatus;
@@ -56,7 +57,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 @DisplayName("Race registration service")
 class RaceRegistrationServiceTest {
 
-        private static final List<RegistrationStatus> CAPACITY_CONSUMING_STATUSES = List.of(
+        private static final List<RegistrationStatus> APPROVED_REGISTRATION_STATUSES = List.of(
+                        RegistrationStatus.APPROVED);
+
+        private static final List<RegistrationStatus> PARTICIPATING_REGISTRATION_STATUSES = List.of(
                         RegistrationStatus.PENDING,
                         RegistrationStatus.APPROVED);
 
@@ -90,8 +94,8 @@ class RaceRegistrationServiceTest {
         }
 
         @Test
-        @DisplayName("creates pending individual registration for own organizer race")
-        void createsPendingIndividualRegistrationForOwnOrganizerRace() {
+        @DisplayName("creates pending individual registration without starting position")
+        void createsPendingIndividualRegistrationWithoutStartingPosition() {
                 UUID raceId = UUID.randomUUID();
                 UUID competitorId = UUID.randomUUID();
 
@@ -104,19 +108,12 @@ class RaceRegistrationServiceTest {
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
                 when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(competitor));
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
-                when(registrationRepository.existsByRaceIdAndStartingPositionAndStatusIn(
-                                raceId,
-                                1,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(false);
                 when(registrationRepository.existsByRaceIdAndCompetitorId(raceId, competitorId))
                                 .thenReturn(false);
                 when(registrationRepository.existsActiveTeamRegistrationForCompetitor(
                                 raceId,
                                 competitorId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(false);
+                                PARTICIPATING_REGISTRATION_STATUSES)).thenReturn(false);
                 when(registrationRepository.save(any(RaceRegistration.class)))
                                 .thenAnswer(invocation -> {
                                         RaceRegistration registration = invocation.getArgument(0);
@@ -126,7 +123,7 @@ class RaceRegistrationServiceTest {
 
                 RaceRegistrationResponse response = registrationService.createRegistration(
                                 raceId,
-                                new RaceRegistrationRequest(competitorId, null, 1));
+                                new RaceRegistrationRequest(competitorId, null, 8));
 
                 ArgumentCaptor<RaceRegistration> captor = ArgumentCaptor.forClass(RaceRegistration.class);
                 verify(registrationRepository).save(captor.capture());
@@ -138,13 +135,63 @@ class RaceRegistrationServiceTest {
                 assertThat(response.competitorId()).isEqualTo(competitorId);
                 assertThat(response.teamId()).isNull();
                 assertThat(response.status()).isEqualTo(RegistrationStatus.PENDING);
-                assertThat(response.startingPosition()).isEqualTo(1);
+                assertThat(response.startingPosition()).isNull();
                 assertThat(response.registeredByUserId()).isEqualTo(organizer.getId());
                 assertThat(savedRegistration.getRace()).isEqualTo(race);
                 assertThat(savedRegistration.getCompetitor()).isEqualTo(competitor);
                 assertThat(savedRegistration.getTeam()).isNull();
                 assertThat(savedRegistration.getRegisteredBy()).isEqualTo(organizer);
                 assertThat(savedRegistration.getRegisteredAt()).isNotNull();
+                assertThat(savedRegistration.getStartingPosition()).isNull();
+
+                verify(registrationRepository, never()).countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES);
+                verify(registrationRepository, never()).existsByRaceIdAndStartingPositionAndStatusIn(
+                                eq(raceId),
+                                any(Integer.class),
+                                eq(APPROVED_REGISTRATION_STATUSES));
+        }
+
+        @Test
+        @DisplayName("allows pending registration when approved race capacity is full")
+        void allowsPendingRegistrationWhenApprovedRaceCapacityIsFull() {
+                UUID raceId = UUID.randomUUID();
+                UUID competitorId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 2, RaceType.MIXED);
+                Competitor competitor = competitor(competitorId, CompetitorStatus.ACTIVE);
+
+                authenticateOrganizer();
+
+                when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(competitor));
+                when(registrationRepository.existsByRaceIdAndCompetitorId(raceId, competitorId))
+                                .thenReturn(false);
+                when(registrationRepository.existsActiveTeamRegistrationForCompetitor(
+                                raceId,
+                                competitorId,
+                                PARTICIPATING_REGISTRATION_STATUSES)).thenReturn(false);
+                when(registrationRepository.save(any(RaceRegistration.class)))
+                                .thenAnswer(invocation -> {
+                                        RaceRegistration registration = invocation.getArgument(0);
+                                        registration.setId(UUID.randomUUID());
+                                        return registration;
+                                });
+
+                RaceRegistrationResponse response = registrationService.createRegistration(
+                                raceId,
+                                new RaceRegistrationRequest(competitorId, null, null));
+
+                assertThat(response.status()).isEqualTo(RegistrationStatus.PENDING);
+                assertThat(response.startingPosition()).isNull();
+
+                verify(registrationRepository, never()).countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES);
+                verify(registrationRepository).save(any(RaceRegistration.class));
         }
 
         @Test
@@ -170,38 +217,7 @@ class RaceRegistrationServiceTest {
                 verify(currentUserService, never()).getOrSynchronizeCurrentUser();
                 verify(registrationRepository, never()).countByRaceIdAndStatusIn(
                                 raceId,
-                                CAPACITY_CONSUMING_STATUSES);
-                verify(competitorRepository, never()).findById(competitorId);
-                verify(registrationRepository, never()).save(any(RaceRegistration.class));
-        }
-
-        @Test
-        @DisplayName("rejects registration with assigned starting position")
-        void rejectsRegistrationWithAssignedStartingPosition() {
-                UUID raceId = UUID.randomUUID();
-                UUID competitorId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race race = race(raceId, organizer, 10, RaceType.MIXED);
-
-                authenticateOrganizer();
-
-                when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
-                when(registrationRepository.existsByRaceIdAndStartingPositionAndStatusIn(
-                                raceId,
-                                1,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(true);
-
-                assertThatThrownBy(() -> registrationService.createRegistration(
-                                raceId,
-                                new RaceRegistrationRequest(competitorId, null, 1)))
-                                .isInstanceOf(ConflictException.class)
-                                .hasMessage("Starting position is already assigned");
-
+                                APPROVED_REGISTRATION_STATUSES);
                 verify(competitorRepository, never()).findById(competitorId);
                 verify(registrationRepository, never()).save(any(RaceRegistration.class));
         }
@@ -229,11 +245,11 @@ class RaceRegistrationServiceTest {
 
                 verify(registrationRepository, never()).countByRaceIdAndStatusIn(
                                 raceId,
-                                CAPACITY_CONSUMING_STATUSES);
+                                APPROVED_REGISTRATION_STATUSES);
                 verify(registrationRepository, never()).existsByRaceIdAndStartingPositionAndStatusIn(
-                                org.mockito.ArgumentMatchers.eq(raceId),
-                                org.mockito.ArgumentMatchers.any(),
-                                org.mockito.ArgumentMatchers.eq(CAPACITY_CONSUMING_STATUSES));
+                                eq(raceId),
+                                any(Integer.class),
+                                eq(APPROVED_REGISTRATION_STATUSES));
                 verify(competitorRepository, never()).findById(competitorId);
                 verify(teamRepository, never()).findById(any(UUID.class));
                 verify(registrationRepository, never()).save(any(RaceRegistration.class));
@@ -254,16 +270,13 @@ class RaceRegistrationServiceTest {
 
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(administrator);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
                 when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(competitor));
                 when(registrationRepository.existsByRaceIdAndCompetitorId(raceId, competitorId))
                                 .thenReturn(false);
                 when(registrationRepository.existsActiveTeamRegistrationForCompetitor(
                                 raceId,
                                 competitorId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(false);
+                                PARTICIPATING_REGISTRATION_STATUSES)).thenReturn(false);
                 when(registrationRepository.save(any(RaceRegistration.class)))
                                 .thenAnswer(invocation -> {
                                         RaceRegistration registration = invocation.getArgument(0);
@@ -279,36 +292,10 @@ class RaceRegistrationServiceTest {
                 assertThat(response.raceId()).isEqualTo(raceId);
                 assertThat(response.competitorId()).isEqualTo(competitorId);
                 assertThat(response.status()).isEqualTo(RegistrationStatus.PENDING);
+                assertThat(response.startingPosition()).isNull();
                 assertThat(response.registeredByUserId()).isEqualTo(administrator.getId());
 
                 verify(registrationRepository, times(1)).save(any(RaceRegistration.class));
-        }
-
-        @Test
-        @DisplayName("rejects registration when race capacity is full")
-        void rejectsRegistrationWhenRaceCapacityIsFull() {
-                UUID raceId = UUID.randomUUID();
-                UUID competitorId = UUID.randomUUID();
-
-                User organizer = user("organizer");
-                Race race = race(raceId, organizer, 1, RaceType.MIXED);
-
-                authenticateOrganizer();
-
-                when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(1L);
-
-                assertThatThrownBy(() -> registrationService.createRegistration(
-                                raceId,
-                                new RaceRegistrationRequest(competitorId, null, null)))
-                                .isInstanceOf(ConflictException.class)
-                                .hasMessage("Race capacity has been reached");
-
-                verify(registrationRepository, never()).save(any(RaceRegistration.class));
-                verify(competitorRepository, never()).findById(competitorId);
         }
 
         @Test
@@ -325,9 +312,6 @@ class RaceRegistrationServiceTest {
 
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
                 when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(injuredCompetitor));
 
                 assertThatThrownBy(() -> registrationService.createRegistration(
@@ -355,9 +339,6 @@ class RaceRegistrationServiceTest {
 
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
                 when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(competitor));
                 when(registrationRepository.existsByRaceIdAndCompetitorId(raceId, competitorId))
                                 .thenReturn(true);
@@ -372,12 +353,12 @@ class RaceRegistrationServiceTest {
                 verify(registrationRepository, never()).existsActiveTeamRegistrationForCompetitor(
                                 raceId,
                                 competitorId,
-                                CAPACITY_CONSUMING_STATUSES);
+                                PARTICIPATING_REGISTRATION_STATUSES);
         }
 
         @Test
-        @DisplayName("rejects individual registration for competitor already in registered team")
-        void rejectsIndividualRegistrationForCompetitorAlreadyInRegisteredTeam() {
+        @DisplayName("rejects individual registration for competitor already in participating team")
+        void rejectsIndividualRegistrationForCompetitorAlreadyInParticipatingTeam() {
                 UUID raceId = UUID.randomUUID();
                 UUID competitorId = UUID.randomUUID();
 
@@ -389,16 +370,13 @@ class RaceRegistrationServiceTest {
 
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
                 when(competitorRepository.findById(competitorId)).thenReturn(Optional.of(competitor));
                 when(registrationRepository.existsByRaceIdAndCompetitorId(raceId, competitorId))
                                 .thenReturn(false);
                 when(registrationRepository.existsActiveTeamRegistrationForCompetitor(
                                 raceId,
                                 competitorId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(true);
+                                PARTICIPATING_REGISTRATION_STATUSES)).thenReturn(true);
 
                 assertThatThrownBy(() -> registrationService.createRegistration(
                                 raceId,
@@ -424,13 +402,14 @@ class RaceRegistrationServiceTest {
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
                 when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
                 when(teamMemberRepository.countByTeamIdAndActiveTrue(teamId)).thenReturn(3L);
                 when(teamMemberRepository.countActiveMembersWithDifferentCompetitorStatus(
                                 teamId,
                                 CompetitorStatus.ACTIVE)).thenReturn(0L);
+                when(registrationRepository.existsIndividualRegistrationForActiveTeamMember(
+                                raceId,
+                                team,
+                                PARTICIPATING_REGISTRATION_STATUSES)).thenReturn(false);
                 when(registrationRepository.existsByRaceIdAndTeamId(raceId, teamId))
                                 .thenReturn(false);
                 when(registrationRepository.save(any(RaceRegistration.class)))
@@ -455,11 +434,47 @@ class RaceRegistrationServiceTest {
                 assertThat(response.teamId()).isEqualTo(teamId);
                 assertThat(response.teamName()).isEqualTo("Moonlight Relay");
                 assertThat(response.status()).isEqualTo(RegistrationStatus.PENDING);
+                assertThat(response.startingPosition()).isNull();
                 assertThat(savedRegistration.getRace()).isEqualTo(race);
                 assertThat(savedRegistration.getCompetitor()).isNull();
                 assertThat(savedRegistration.getTeam()).isEqualTo(team);
                 assertThat(savedRegistration.getRegisteredBy()).isEqualTo(organizer);
                 assertThat(savedRegistration.getRegisteredAt()).isNotNull();
+                assertThat(savedRegistration.getStartingPosition()).isNull();
+        }
+
+        @Test
+        @DisplayName("rejects team registration when active member is already registered individually")
+        void rejectsTeamRegistrationWhenActiveMemberIsAlreadyRegisteredIndividually() {
+                UUID raceId = UUID.randomUUID();
+                UUID teamId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 10, RaceType.MIXED);
+                Team team = team(teamId);
+
+                authenticateOrganizer();
+
+                when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
+                when(teamMemberRepository.countByTeamIdAndActiveTrue(teamId)).thenReturn(1L);
+                when(teamMemberRepository.countActiveMembersWithDifferentCompetitorStatus(
+                                teamId,
+                                CompetitorStatus.ACTIVE)).thenReturn(0L);
+                when(registrationRepository.existsIndividualRegistrationForActiveTeamMember(
+                                raceId,
+                                team,
+                                PARTICIPATING_REGISTRATION_STATUSES)).thenReturn(true);
+
+                assertThatThrownBy(() -> registrationService.createRegistration(
+                                raceId,
+                                new RaceRegistrationRequest(null, teamId, null)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("An active team member is already registered individually in this race");
+
+                verify(registrationRepository, never()).existsByRaceIdAndTeamId(raceId, teamId);
+                verify(registrationRepository, never()).save(any(RaceRegistration.class));
         }
 
         @Test
@@ -477,9 +492,6 @@ class RaceRegistrationServiceTest {
 
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
                 when(teamRepository.findById(teamId)).thenReturn(Optional.of(suspendedTeam));
 
                 assertThatThrownBy(() -> registrationService.createRegistration(
@@ -492,6 +504,10 @@ class RaceRegistrationServiceTest {
                 verify(teamMemberRepository, never()).countActiveMembersWithDifferentCompetitorStatus(
                                 teamId,
                                 CompetitorStatus.ACTIVE);
+                verify(registrationRepository, never()).existsIndividualRegistrationForActiveTeamMember(
+                                eq(raceId),
+                                eq(suspendedTeam),
+                                eq(PARTICIPATING_REGISTRATION_STATUSES));
                 verify(registrationRepository, never()).existsByRaceIdAndTeamId(raceId, teamId);
                 verify(registrationRepository, never()).save(any(RaceRegistration.class));
         }
@@ -510,9 +526,6 @@ class RaceRegistrationServiceTest {
 
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
                 when(teamRepository.findById(teamId)).thenReturn(Optional.of(activeTeam));
                 when(teamMemberRepository.countByTeamIdAndActiveTrue(teamId)).thenReturn(0L);
 
@@ -525,6 +538,10 @@ class RaceRegistrationServiceTest {
                 verify(teamMemberRepository, never()).countActiveMembersWithDifferentCompetitorStatus(
                                 teamId,
                                 CompetitorStatus.ACTIVE);
+                verify(registrationRepository, never()).existsIndividualRegistrationForActiveTeamMember(
+                                eq(raceId),
+                                eq(activeTeam),
+                                eq(PARTICIPATING_REGISTRATION_STATUSES));
                 verify(registrationRepository, never()).existsByRaceIdAndTeamId(raceId, teamId);
                 verify(registrationRepository, never()).save(any(RaceRegistration.class));
         }
@@ -543,9 +560,6 @@ class RaceRegistrationServiceTest {
 
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
                 when(teamRepository.findById(teamId)).thenReturn(Optional.of(activeTeam));
                 when(teamMemberRepository.countByTeamIdAndActiveTrue(teamId)).thenReturn(1L);
                 when(teamMemberRepository.countActiveMembersWithDifferentCompetitorStatus(
@@ -558,6 +572,10 @@ class RaceRegistrationServiceTest {
                                 .isInstanceOf(ConflictException.class)
                                 .hasMessage("All active team members must be active competitors");
 
+                verify(registrationRepository, never()).existsIndividualRegistrationForActiveTeamMember(
+                                eq(raceId),
+                                eq(activeTeam),
+                                eq(PARTICIPATING_REGISTRATION_STATUSES));
                 verify(registrationRepository, never()).existsByRaceIdAndTeamId(raceId, teamId);
                 verify(registrationRepository, never()).save(any(RaceRegistration.class));
         }
@@ -575,9 +593,6 @@ class RaceRegistrationServiceTest {
 
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
 
                 assertThatThrownBy(() -> registrationService.createRegistration(
                                 raceId,
@@ -602,9 +617,6 @@ class RaceRegistrationServiceTest {
 
                 when(raceRepository.findById(raceId)).thenReturn(Optional.of(race));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
-                when(registrationRepository.countByRaceIdAndStatusIn(
-                                raceId,
-                                CAPACITY_CONSUMING_STATUSES)).thenReturn(0L);
 
                 assertThatThrownBy(() -> registrationService.createRegistration(
                                 raceId,
@@ -617,8 +629,8 @@ class RaceRegistrationServiceTest {
         }
 
         @Test
-        @DisplayName("approves pending registration without changing controlled fields")
-        void approvesPendingRegistrationWithoutChangingControlledFields() {
+        @DisplayName("approves pending registration and assigns available starting position")
+        void approvesPendingRegistrationAndAssignsAvailableStartingPosition() {
                 UUID registrationId = UUID.randomUUID();
                 UUID raceId = UUID.randomUUID();
                 UUID competitorId = UUID.randomUUID();
@@ -634,7 +646,7 @@ class RaceRegistrationServiceTest {
                                 .competitor(competitor)
                                 .registeredAt(registeredAt)
                                 .status(RegistrationStatus.PENDING)
-                                .startingPosition(3)
+                                .startingPosition(null)
                                 .validationNotes("Initial validation note")
                                 .registeredBy(organizer)
                                 .build();
@@ -644,9 +656,22 @@ class RaceRegistrationServiceTest {
                 when(registrationRepository.findDetailedById(registrationId))
                                 .thenReturn(Optional.of(registration));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(registrationRepository.existsActiveTeamRegistrationForCompetitor(
+                                raceId,
+                                competitorId,
+                                PARTICIPATING_REGISTRATION_STATUSES)).thenReturn(false);
+                when(registrationRepository.countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES)).thenReturn(1L);
+                when(registrationRepository.existsByRaceIdAndStartingPositionAndStatusIn(
+                                raceId,
+                                3,
+                                APPROVED_REGISTRATION_STATUSES)).thenReturn(false);
                 when(registrationRepository.save(registration)).thenReturn(registration);
 
-                RaceRegistrationResponse response = registrationService.approveRegistration(registrationId);
+                RaceRegistrationResponse response = registrationService.approveRegistration(
+                                registrationId,
+                                new RegistrationApprovalRequest(3));
 
                 assertThat(response.status()).isEqualTo(RegistrationStatus.APPROVED);
                 assertThat(response.raceId()).isEqualTo(raceId);
@@ -667,6 +692,17 @@ class RaceRegistrationServiceTest {
                 assertThat(registration.getRegisteredBy()).isEqualTo(organizer);
 
                 verify(registrationRepository).findDetailedById(registrationId);
+                verify(registrationRepository).existsActiveTeamRegistrationForCompetitor(
+                                raceId,
+                                competitorId,
+                                PARTICIPATING_REGISTRATION_STATUSES);
+                verify(registrationRepository).countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES);
+                verify(registrationRepository).existsByRaceIdAndStartingPositionAndStatusIn(
+                                raceId,
+                                3,
+                                APPROVED_REGISTRATION_STATUSES);
                 verify(registrationRepository, times(1)).save(registration);
                 verify(auditLogService).log(
                                 eq(organizer),
@@ -676,6 +712,260 @@ class RaceRegistrationServiceTest {
                                 eq("Registration approved"),
                                 eq("status=PENDING"),
                                 eq("status=APPROVED"));
+        }
+
+        @Test
+        @DisplayName("rejects approval of team registration when team becomes inactive")
+        void rejectsApprovalOfTeamRegistrationWhenTeamBecomesInactive() {
+                UUID registrationId = UUID.randomUUID();
+                UUID raceId = UUID.randomUUID();
+                UUID teamId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 10, RaceType.TEAM);
+                Team inactiveTeam = team(teamId);
+                inactiveTeam.setStatus(TeamStatus.INACTIVE);
+
+                RaceRegistration registration = RaceRegistration.builder()
+                                .id(registrationId)
+                                .race(race)
+                                .team(inactiveTeam)
+                                .registeredAt(LocalDateTime.now().minusMinutes(10))
+                                .status(RegistrationStatus.PENDING)
+                                .startingPosition(null)
+                                .registeredBy(organizer)
+                                .build();
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+
+                assertThatThrownBy(() -> registrationService.approveRegistration(
+                                registrationId,
+                                new RegistrationApprovalRequest(1)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Only active teams can be registered");
+
+                assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.PENDING);
+                assertThat(registration.getStartingPosition()).isNull();
+
+                verify(teamMemberRepository, never()).countByTeamIdAndActiveTrue(teamId);
+                verify(registrationRepository, never()).countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES);
+                verify(registrationRepository, never()).save(any(RaceRegistration.class));
+        }
+
+        @Test
+        @DisplayName("rejects approval of team registration without active members")
+        void rejectsApprovalOfTeamRegistrationWithoutActiveMembers() {
+                UUID registrationId = UUID.randomUUID();
+                UUID raceId = UUID.randomUUID();
+                UUID teamId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 10, RaceType.TEAM);
+                Team activeTeam = team(teamId);
+
+                RaceRegistration registration = RaceRegistration.builder()
+                                .id(registrationId)
+                                .race(race)
+                                .team(activeTeam)
+                                .registeredAt(LocalDateTime.now().minusMinutes(10))
+                                .status(RegistrationStatus.PENDING)
+                                .startingPosition(null)
+                                .registeredBy(organizer)
+                                .build();
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(teamMemberRepository.countByTeamIdAndActiveTrue(teamId)).thenReturn(0L);
+
+                assertThatThrownBy(() -> registrationService.approveRegistration(
+                                registrationId,
+                                new RegistrationApprovalRequest(1)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Team must have at least one active member");
+
+                assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.PENDING);
+                assertThat(registration.getStartingPosition()).isNull();
+
+                verify(teamMemberRepository).countByTeamIdAndActiveTrue(teamId);
+                verify(teamMemberRepository, never()).countActiveMembersWithDifferentCompetitorStatus(
+                                teamId,
+                                CompetitorStatus.ACTIVE);
+                verify(registrationRepository, never()).countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES);
+                verify(registrationRepository, never()).save(any(RaceRegistration.class));
+        }
+
+        @Test
+        @DisplayName("rejects approval of team registration with inactive active member")
+        void rejectsApprovalOfTeamRegistrationWithInactiveActiveMember() {
+                UUID registrationId = UUID.randomUUID();
+                UUID raceId = UUID.randomUUID();
+                UUID teamId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 10, RaceType.TEAM);
+                Team activeTeam = team(teamId);
+
+                RaceRegistration registration = RaceRegistration.builder()
+                                .id(registrationId)
+                                .race(race)
+                                .team(activeTeam)
+                                .registeredAt(LocalDateTime.now().minusMinutes(10))
+                                .status(RegistrationStatus.PENDING)
+                                .startingPosition(null)
+                                .registeredBy(organizer)
+                                .build();
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(teamMemberRepository.countByTeamIdAndActiveTrue(teamId)).thenReturn(1L);
+                when(teamMemberRepository.countActiveMembersWithDifferentCompetitorStatus(
+                                teamId,
+                                CompetitorStatus.ACTIVE)).thenReturn(1L);
+
+                assertThatThrownBy(() -> registrationService.approveRegistration(
+                                registrationId,
+                                new RegistrationApprovalRequest(1)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("All active team members must be active competitors");
+
+                assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.PENDING);
+                assertThat(registration.getStartingPosition()).isNull();
+
+                verify(registrationRepository, never()).countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES);
+                verify(registrationRepository, never()).save(any(RaceRegistration.class));
+        }
+
+        @Test
+        @DisplayName("rejects approval when approved race capacity is full")
+        void rejectsApprovalWhenApprovedRaceCapacityIsFull() {
+                UUID registrationId = UUID.randomUUID();
+                UUID raceId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 2, RaceType.MIXED);
+                RaceRegistration registration = pendingRegistration(registrationId, race, organizer);
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(registrationRepository.existsActiveTeamRegistrationForCompetitor(
+                                raceId,
+                                registration.getCompetitor().getId(),
+                                PARTICIPATING_REGISTRATION_STATUSES)).thenReturn(false);
+                when(registrationRepository.countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES)).thenReturn(2L);
+
+                assertThatThrownBy(() -> registrationService.approveRegistration(
+                                registrationId,
+                                new RegistrationApprovalRequest(1)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Race capacity has been reached");
+
+                assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.PENDING);
+                assertThat(registration.getStartingPosition()).isNull();
+
+                verify(registrationRepository, never()).existsByRaceIdAndStartingPositionAndStatusIn(
+                                eq(raceId),
+                                any(Integer.class),
+                                eq(APPROVED_REGISTRATION_STATUSES));
+                verify(registrationRepository, never()).save(any(RaceRegistration.class));
+        }
+
+        @Test
+        @DisplayName("rejects approval with position above race maximum")
+        void rejectsApprovalWithPositionAboveRaceMaximum() {
+                UUID registrationId = UUID.randomUUID();
+                UUID raceId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 2, RaceType.MIXED);
+                RaceRegistration registration = pendingRegistration(registrationId, race, organizer);
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(registrationRepository.existsActiveTeamRegistrationForCompetitor(
+                                raceId,
+                                registration.getCompetitor().getId(),
+                                PARTICIPATING_REGISTRATION_STATUSES)).thenReturn(false);
+                when(registrationRepository.countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES)).thenReturn(0L);
+
+                assertThatThrownBy(() -> registrationService.approveRegistration(
+                                registrationId,
+                                new RegistrationApprovalRequest(3)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Starting position must be between 1 and 2");
+
+                assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.PENDING);
+                assertThat(registration.getStartingPosition()).isNull();
+
+                verify(registrationRepository, never()).existsByRaceIdAndStartingPositionAndStatusIn(
+                                eq(raceId),
+                                any(Integer.class),
+                                eq(APPROVED_REGISTRATION_STATUSES));
+                verify(registrationRepository, never()).save(any(RaceRegistration.class));
+        }
+
+        @Test
+        @DisplayName("rejects approval when starting position is already assigned to approved registration")
+        void rejectsApprovalWhenStartingPositionIsAlreadyAssignedToApprovedRegistration() {
+                UUID registrationId = UUID.randomUUID();
+                UUID raceId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 10, RaceType.MIXED);
+                RaceRegistration registration = pendingRegistration(registrationId, race, organizer);
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(registrationRepository.existsActiveTeamRegistrationForCompetitor(
+                                raceId,
+                                registration.getCompetitor().getId(),
+                                PARTICIPATING_REGISTRATION_STATUSES)).thenReturn(false);
+                when(registrationRepository.countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES)).thenReturn(0L);
+                when(registrationRepository.existsByRaceIdAndStartingPositionAndStatusIn(
+                                raceId,
+                                1,
+                                APPROVED_REGISTRATION_STATUSES)).thenReturn(true);
+
+                assertThatThrownBy(() -> registrationService.approveRegistration(
+                                registrationId,
+                                new RegistrationApprovalRequest(1)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Starting position is already assigned");
+
+                assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.PENDING);
+                assertThat(registration.getStartingPosition()).isNull();
+
+                verify(registrationRepository, never()).save(any(RaceRegistration.class));
         }
 
         @Test
@@ -706,7 +996,9 @@ class RaceRegistrationServiceTest {
                                 .thenReturn(Optional.of(registration));
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
 
-                assertThatThrownBy(() -> registrationService.approveRegistration(registrationId))
+                assertThatThrownBy(() -> registrationService.approveRegistration(
+                                registrationId,
+                                new RegistrationApprovalRequest(4)))
                                 .isInstanceOf(ConflictException.class)
                                 .hasMessage("Only pending registrations can be approved");
 
@@ -714,6 +1006,9 @@ class RaceRegistrationServiceTest {
                 assertThat(registration.getValidationNotes()).isEqualTo("Already approved");
 
                 verify(registrationRepository).findDetailedById(registrationId);
+                verify(registrationRepository, never()).countByRaceIdAndStatusIn(
+                                raceId,
+                                APPROVED_REGISTRATION_STATUSES);
                 verify(registrationRepository, never()).save(any(RaceRegistration.class));
         }
 
@@ -735,7 +1030,7 @@ class RaceRegistrationServiceTest {
                                 .competitor(competitor)
                                 .registeredAt(registeredAt)
                                 .status(RegistrationStatus.PENDING)
-                                .startingPosition(4)
+                                .startingPosition(null)
                                 .validationNotes(null)
                                 .registeredBy(organizer)
                                 .build();
@@ -761,7 +1056,7 @@ class RaceRegistrationServiceTest {
                 assertThat(response.competitorId()).isEqualTo(competitorId);
                 assertThat(response.teamId()).isNull();
                 assertThat(response.registeredAt()).isEqualTo(registeredAt);
-                assertThat(response.startingPosition()).isEqualTo(4);
+                assertThat(response.startingPosition()).isNull();
                 assertThat(response.registeredByUserId()).isEqualTo(organizer.getId());
 
                 assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.REJECTED);
@@ -771,7 +1066,7 @@ class RaceRegistrationServiceTest {
                 assertThat(registration.getCompetitor()).isEqualTo(competitor);
                 assertThat(registration.getTeam()).isNull();
                 assertThat(registration.getRegisteredAt()).isEqualTo(registeredAt);
-                assertThat(registration.getStartingPosition()).isEqualTo(4);
+                assertThat(registration.getStartingPosition()).isNull();
                 assertThat(registration.getRegisteredBy()).isEqualTo(organizer);
 
                 verify(registrationRepository).findDetailedById(registrationId);
@@ -831,27 +1126,14 @@ class RaceRegistrationServiceTest {
         }
 
         @Test
-        @DisplayName("cancels pending registration without changing controlled fields")
-        void cancelsPendingRegistrationWithoutChangingControlledFields() {
+        @DisplayName("cancels pending registration without assigned position")
+        void cancelsPendingRegistrationWithoutAssignedPosition() {
                 UUID registrationId = UUID.randomUUID();
                 UUID raceId = UUID.randomUUID();
-                UUID competitorId = UUID.randomUUID();
 
                 User organizer = user("organizer");
                 Race race = race(raceId, organizer, 10, RaceType.MIXED);
-                Competitor competitor = competitor(competitorId, CompetitorStatus.ACTIVE);
-                LocalDateTime registeredAt = LocalDateTime.now().minusMinutes(10);
-
-                RaceRegistration registration = RaceRegistration.builder()
-                                .id(registrationId)
-                                .race(race)
-                                .competitor(competitor)
-                                .registeredAt(registeredAt)
-                                .status(RegistrationStatus.PENDING)
-                                .startingPosition(5)
-                                .validationNotes("Pending registration")
-                                .registeredBy(organizer)
-                                .build();
+                RaceRegistration registration = pendingRegistration(registrationId, race, organizer);
 
                 authenticateOrganizer();
 
@@ -863,13 +1145,7 @@ class RaceRegistrationServiceTest {
                 registrationService.cancelRegistration(registrationId);
 
                 assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CANCELLED);
-                assertThat(registration.getRace()).isEqualTo(race);
-                assertThat(registration.getCompetitor()).isEqualTo(competitor);
-                assertThat(registration.getTeam()).isNull();
-                assertThat(registration.getRegisteredAt()).isEqualTo(registeredAt);
-                assertThat(registration.getStartingPosition()).isEqualTo(5);
-                assertThat(registration.getValidationNotes()).isEqualTo("Pending registration");
-                assertThat(registration.getRegisteredBy()).isEqualTo(organizer);
+                assertThat(registration.getStartingPosition()).isNull();
 
                 verify(registrationRepository).findDetailedById(registrationId);
                 verify(registrationRepository, times(1)).save(registration);
@@ -884,8 +1160,8 @@ class RaceRegistrationServiceTest {
         }
 
         @Test
-        @DisplayName("cancels approved registration without changing controlled fields")
-        void cancelsApprovedRegistrationWithoutChangingControlledFields() {
+        @DisplayName("cancels approved registration without changing assigned position")
+        void cancelsApprovedRegistrationWithoutChangingAssignedPosition() {
                 UUID registrationId = UUID.randomUUID();
                 UUID raceId = UUID.randomUUID();
                 UUID competitorId = UUID.randomUUID();
@@ -998,7 +1274,7 @@ class RaceRegistrationServiceTest {
                                 .competitor(competitor)
                                 .registeredAt(registeredAt)
                                 .status(RegistrationStatus.REJECTED)
-                                .startingPosition(8)
+                                .startingPosition(null)
                                 .validationNotes("Participant was rejected")
                                 .registeredBy(organizer)
                                 .build();
@@ -1018,12 +1294,28 @@ class RaceRegistrationServiceTest {
                 assertThat(registration.getCompetitor()).isEqualTo(competitor);
                 assertThat(registration.getTeam()).isNull();
                 assertThat(registration.getRegisteredAt()).isEqualTo(registeredAt);
-                assertThat(registration.getStartingPosition()).isEqualTo(8);
+                assertThat(registration.getStartingPosition()).isNull();
                 assertThat(registration.getValidationNotes()).isEqualTo("Participant was rejected");
                 assertThat(registration.getRegisteredBy()).isEqualTo(organizer);
 
                 verify(registrationRepository).findDetailedById(registrationId);
                 verify(registrationRepository, never()).save(any(RaceRegistration.class));
+        }
+
+        private RaceRegistration pendingRegistration(
+                        UUID registrationId,
+                        Race race,
+                        User organizer) {
+                return RaceRegistration.builder()
+                                .id(registrationId)
+                                .race(race)
+                                .competitor(competitor(UUID.randomUUID(), CompetitorStatus.ACTIVE))
+                                .registeredAt(LocalDateTime.now().minusMinutes(10))
+                                .status(RegistrationStatus.PENDING)
+                                .startingPosition(null)
+                                .validationNotes(null)
+                                .registeredBy(organizer)
+                                .build();
         }
 
         private void authenticateOrganizer() {
