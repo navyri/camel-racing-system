@@ -46,6 +46,12 @@ export function getRaces(
     })
 }
 
+export function getUpcomingRaces(limit = 5): Promise<RaceResponse[]> {
+    return apiClient<RaceResponse[]>(`/api/races/upcoming?limit=${limit}`, {
+        method: 'GET',
+    })
+}
+
 export function getRaceById(raceId: string): Promise<RaceResponse> {
     return apiClient<RaceResponse>(`/api/races/${encodeURIComponent(raceId)}`, {
         method: 'GET',

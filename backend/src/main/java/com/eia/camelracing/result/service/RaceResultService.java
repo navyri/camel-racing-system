@@ -34,6 +34,9 @@ import com.eia.camelracing.user.entity.User;
 
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -46,6 +49,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class RaceResultService {
 
     private static final int WINNER_POSITION = 1;
+
+    private static final int DEFAULT_RECENT_LIMIT = 5;
+    private static final int MAX_RECENT_LIMIT = 100;
 
     private static final List<ResultStatus> COMPLETED_RACE_STATUSES = List.of(
             ResultStatus.FINISHED,
@@ -118,6 +124,19 @@ public class RaceResultService {
         return resultRepository.findDetailedByRaceId(
                 raceId,
                 ResultStatus.FINISHED).stream()
+                .map(RaceResultMapper::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<RaceResultResponse> getRecentResults(Integer limit) {
+        int resolvedLimit = resolveRecentLimit(limit);
+        Pageable pageable = PageRequest.of(
+                0,
+                resolvedLimit,
+                Sort.by("recordedAt").descending());
+
+        return resultRepository.findRecentDetailedResults(pageable).stream()
                 .map(RaceResultMapper::toResponse)
                 .toList();
     }
@@ -334,6 +353,17 @@ public class RaceResultService {
         return resultRepository.findDetailedById(id)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Result with id " + id + " was not found"));
+    }
+
+    private int resolveRecentLimit(Integer limit) {
+        int resolvedLimit = limit == null ? DEFAULT_RECENT_LIMIT : limit;
+
+        if (resolvedLimit < 1 || resolvedLimit > MAX_RECENT_LIMIT) {
+            throw new IllegalArgumentException(
+                    "Limit must be between 1 and " + MAX_RECENT_LIMIT);
+        }
+
+        return resolvedLimit;
     }
 
     private String normalizeNotes(String notes) {

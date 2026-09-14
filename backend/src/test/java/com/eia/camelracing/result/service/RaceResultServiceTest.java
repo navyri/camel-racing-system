@@ -51,6 +51,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -732,6 +734,82 @@ class RaceResultServiceTest {
                                 eq(
                                                 "finalPosition=1, completionTimeSeconds=190, penaltyTimeSeconds=0, "
                                                                 + "status=FINISHED, notes=Corrected result"));
+        }
+
+        @Test
+        @DisplayName("returns recently recorded results with default limit")
+        void returnsRecentlyRecordedResultsWithDefaultLimit() {
+                UUID raceId = UUID.randomUUID();
+                UUID competitorId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer);
+                Competitor competitor = competitor(competitorId);
+                RaceRegistration registration = registration(
+                                UUID.randomUUID(),
+                                race,
+                                competitor,
+                                null,
+                                RegistrationStatus.APPROVED,
+                                1,
+                                organizer);
+                RaceResult result = finishedResult(
+                                UUID.randomUUID(),
+                                registration,
+                                organizer,
+                                187,
+                                0,
+                                LocalDateTime.now());
+
+                PageRequest pageable = PageRequest.of(
+                                0,
+                                5,
+                                Sort.by("recordedAt").descending());
+
+                when(resultRepository.findRecentDetailedResults(pageable))
+                                .thenReturn(List.of(result));
+
+                List<RaceResultResponse> response = resultService.getRecentResults(null);
+
+                assertThat(response).hasSize(1);
+                assertThat(response.getFirst().id()).isEqualTo(result.getId());
+                assertThat(response.getFirst().raceId()).isEqualTo(raceId);
+                assertThat(response.getFirst().competitorId()).isEqualTo(competitorId);
+                assertThat(response.getFirst().recordedAt()).isEqualTo(result.getRecordedAt());
+
+                verify(resultRepository).findRecentDetailedResults(pageable);
+        }
+
+        @Test
+        @DisplayName("returns recently recorded results with requested limit")
+        void returnsRecentlyRecordedResultsWithRequestedLimit() {
+                PageRequest pageable = PageRequest.of(
+                                0,
+                                3,
+                                Sort.by("recordedAt").descending());
+
+                when(resultRepository.findRecentDetailedResults(pageable))
+                                .thenReturn(List.of());
+
+                List<RaceResultResponse> response = resultService.getRecentResults(3);
+
+                assertThat(response).isEmpty();
+
+                verify(resultRepository).findRecentDetailedResults(pageable);
+        }
+
+        @Test
+        @DisplayName("rejects invalid recent result limit")
+        void rejectsInvalidRecentResultLimit() {
+                assertThatThrownBy(() -> resultService.getRecentResults(0))
+                                .isInstanceOf(IllegalArgumentException.class)
+                                .hasMessage("Limit must be between 1 and 100");
+
+                assertThatThrownBy(() -> resultService.getRecentResults(101))
+                                .isInstanceOf(IllegalArgumentException.class)
+                                .hasMessage("Limit must be between 1 and 100");
+
+                verify(resultRepository, never()).findRecentDetailedResults(any());
         }
 
         private void configureCompetitorStatistics(

@@ -9,6 +9,7 @@ import com.eia.camelracing.result.entity.ResultStatus;
 import com.eia.camelracing.standing.projection.CompetitorStandingProjection;
 import com.eia.camelracing.standing.projection.TeamStandingProjection;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -38,6 +39,20 @@ public interface RaceResultRepository extends JpaRepository<RaceResult, UUID> {
         List<RaceResult> findDetailedByRaceId(
                         @Param("raceId") UUID raceId,
                         @Param("finishedStatus") ResultStatus finishedStatus);
+
+        @EntityGraph(attributePaths = {
+                        "registration",
+                        "registration.race",
+                        "registration.competitor",
+                        "registration.team",
+                        "recordedBy"
+        })
+        @Query("""
+                        select result
+                        from RaceResult result
+                        order by result.recordedAt desc
+                        """)
+        List<RaceResult> findRecentDetailedResults(Pageable pageable);
 
         @EntityGraph(attributePaths = {
                         "registration",

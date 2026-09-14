@@ -13,6 +13,7 @@ vi.mock('./apiClient', () => ({
 
 const {
     createResult,
+    getRecentResults,
     getResultById,
     getResultsByRaceId,
     updateResult,
@@ -68,6 +69,26 @@ describe('resultsApi', () => {
                 method: 'GET',
             },
         )
+    })
+
+    it('gets recently recorded results with the default limit', async () => {
+        apiClient.mockResolvedValueOnce([resultResponse])
+
+        await expect(getRecentResults()).resolves.toEqual([resultResponse])
+
+        expect(apiClient).toHaveBeenCalledWith('/api/results/recent?limit=5', {
+            method: 'GET',
+        })
+    })
+
+    it('gets recently recorded results with a custom limit', async () => {
+        apiClient.mockResolvedValueOnce([resultResponse])
+
+        await expect(getRecentResults(3)).resolves.toEqual([resultResponse])
+
+        expect(apiClient).toHaveBeenCalledWith('/api/results/recent?limit=3', {
+            method: 'GET',
+        })
     })
 
     it('gets a result by id', async () => {

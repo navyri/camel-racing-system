@@ -1,6 +1,6 @@
 <p align="center">
   <img
-    src=https://capsule-render.vercel.app/api?type=waving&height=190&color=6d3f15&text=Camel%20Racing%20Frontend&fontColor=FFF4E0&fontSize=40&fontAlignY=36&desc=React%20%2B%20TypeScript%20%2B%20Vite%20%2B%20Nginx&descAlignY=59&descSize=18"
+    src="https://capsule-render.vercel.app/api?type=waving&height=190&color=6d3f15&text=Camel%20Racing%20Frontend&fontColor=FFF4E0&fontSize=40&fontAlignY=36&desc=React%20%2B%20TypeScript%20%2B%20Vite%20%2B%20Nginx&descAlignY=59&descSize=18"
     alt="Camel Racing Frontend"
   />
 </p>
@@ -217,10 +217,29 @@ Los componentes de interfaz aplican controles visuales segun el rol:
 | Rol | Comportamiento de interfaz |
 |---|---|
 | `ADMINISTRATOR` | Visualiza y administra todos los recursos disponibles |
-| `RACE_ORGANIZER` | Gestiona recursos asociados a sus propias carreras |
+| `RACE_ORGANIZER` | Gestiona recursos asociados a sus propias carreras y consulta competidores y equipos |
 | `VIEWER` | Visualiza informacion sin acciones de escritura |
 
 El frontend incluye guards de ruta y controles de interfaz, pero estos no reemplazan las verificaciones de seguridad del backend.
+
+## Datos demo
+
+La demostracion local puede cargarse desde la raiz del repositorio con el archivo `seed-dark-fantasy-demo.sql`.
+
+Antes de ejecutar el seed, asegúrate de que la base de datos sea completamente limpia. El script carga usuarios locales vinculados con Keycloak, roles, competidores, equipos, carreras, inscripciones y resultados. No debes iniciar sesion antes de ejecutar el seed si la base fue reiniciada, porque el seed crea las filas locales necesarias.
+
+```powershell
+Get-Content .\seed-dark-fantasy-demo.sql |
+    docker exec -i camel-racing-db psql -v ON_ERROR_STOP=1 -U camel_racing_user -d camel_racing_db
+```
+
+Luego realiza una recarga fuerte del navegador:
+
+```text
+Ctrl + Shift + R
+```
+
+El seed inserta datos SQL directamente, por lo que Audit Log inicia vacio. Realiza aprobaciones, rechazos, cambios de estado y resultados desde la interfaz para generar eventos auditables.
 
 ## Estructura principal
 
@@ -305,6 +324,7 @@ Build successful
 | Error de API o 401 | No hay sesion valida o el token expiro | Cierra sesion, vuelve a iniciar y verifica Keycloak |
 | Accion no visible | El usuario no tiene el rol o ownership necesario | Prueba con `admin` o revisa la propiedad de la carrera |
 | Recarga directa devuelve error | Configuracion Nginx ausente o desactualizada | Reconstruye el servicio frontend con `docker compose up -d --build frontend` |
+| Seed aborta | Existen datos en la base local | Usa una base limpia antes de ejecutarlo |
 
 ## Documentacion relacionada
 

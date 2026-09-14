@@ -23,6 +23,18 @@ public interface RaceRepository extends JpaRepository<Race, UUID> {
     @Query("""
             select race
             from Race race
+            where race.scheduledAt > :scheduledAt
+                and race.status not in :excludedStatuses
+            order by race.scheduledAt asc
+            """)
+    List<Race> findUpcomingRaces(
+            @Param("scheduledAt") LocalDateTime scheduledAt,
+            @Param("excludedStatuses") List<RaceStatus> excludedStatuses,
+            Pageable pageable);
+
+    @Query("""
+            select race
+            from Race race
             where (:status is null or race.status = :status)
                 and (:raceType is null or race.raceType = :raceType)
                 and (
