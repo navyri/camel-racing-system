@@ -46,30 +46,22 @@ El proyecto fue desarrollado de forma individual como parte del proceso academic
 
 La identidad visual del frontend sigue la direccion **Dark Desert Shrine**: una mezcla entre registro antiguo de carreras, expedicion por el desierto y club de competencia misterioso, usando tonos de cobre, arena, madera, rojo profundo y oasis.
 
-> **Nota de seguridad:** el proyecto utiliza Keycloak para autenticacion y autorizacion. Los archivos `.env` locales pueden contener configuracion especifica del entorno y no deben versionarse. El repositorio incluye plantillas de configuracion, pero no debe incluir secretos, tokens, cookies, contrasenas personales ni codigos de autenticacion.
+## Integrante
+
+| Nombre | Rol |
+|---|---|
+| Mary | Desarrollo individual: arquitectura, backend, frontend, base de datos, seguridad, Docker, pruebas y documentacion |
+
+> **Nota de seguridad:** el proyecto utiliza Keycloak para autenticación y autorización. Los archivos `.env` locales pueden contener configuración específica del entorno y no deben versionarse. El repositorio incluye plantillas de configuración, pero no incluye secretos, tokens, cookies, contraseñas personales ni códigos de autenticación.
 
 ## Video de demostracion
 
 <p align="center">
   <img
-    src="https://capsule-render.vercel.app/api?type=rect&height=110&color=4E8B7A&text=Video%20de%20demostracion%20pendiente&fontColor=FFF4E0&fontSize=24&fontAlignY=52"
+    src="https://capsule-render.vercel.app/api?type=rect&height=110&color=6d3f15&text=Video%20de%20demostracion%20pendiente&fontColor=FFF4E0&fontSize=24&fontAlignY=52"
     alt="Espacio reservado para video de demostracion"
   />
 </p>
-
-<!--
-Cuando el video este disponible, reemplaza el bloque anterior por uno como este:
-
-<p align="center">
-  <a href="AQUI_VA_EL_ENLACE_DEL_VIDEO" target="_blank" rel="noopener noreferrer">
-    <img
-      src="./docs/images/video-thumbnail.png"
-      alt="Ver video de demostracion de Camel Racing System"
-      width="850"
-    />
-  </a>
-</p>
--->
 
 <p align="center">
   <img
@@ -120,7 +112,7 @@ Tambien maneja los siguientes estados para el ciclo de vida de una carrera:
 ```text
 DRAFT
 OPEN_FOR_REGISTRATION
-REGISTRATION_CLOSED
+CLOSED_FOR_REGISTRATION
 IN_PROGRESS
 COMPLETED
 CANCELLED
@@ -201,7 +193,7 @@ CANCELLED
 
 ```text
                          +----------------------+
-                         |      Frontend        |
+                         |       Frontend       |
                          | React + TypeScript   |
                          | Vite build + Nginx   |
                          | http://localhost:5173|
@@ -257,8 +249,15 @@ docker compose up -d
 
 El proyecto utiliza **PostgreSQL** como base de datos relacional. Las entidades principales se almacenan en tablas relacionadas mediante claves foraneas y UUIDs. Spring Data JPA se encarga del mapeo entre las entidades Java y el modelo relacional.
 
+### Diagrama entidad-relacion
+
+El diagrama visual del modelo relacional, sus tablas, relaciones y restricciones principales esta disponible en:
+
+- [Diagrama de base de datos](./docs/database-diagram.md)
+
 ```text
 User
+ ├── N:M Role
  ├── 1:N Race
  ├── 1:N RaceRegistration
  ├── 1:N RaceResult
@@ -300,7 +299,9 @@ Los resultados se asocian a inscripciones aprobadas. Esto permite unificar resul
 
 | Tabla | Responsabilidad |
 |---|---|
-| `users` | Usuarios locales sincronizados con la identidad autenticada |
+| `users` | Usuarios locales vinculados con la identidad de Keycloak |
+| `roles` | Roles de aplicacion permitidos |
+| `user_roles` | Relacion entre usuarios y roles |
 | `competitors` | Participantes individuales y sus estadisticas |
 | `teams` | Equipos, entrenador, estado y estadisticas |
 | `team_members` | Relacion historica entre equipos y competidores |
@@ -334,7 +335,7 @@ La estrategia de seguridad esta basada en Keycloak y Spring Security.
 | Rol | Capacidades principales |
 |---|---|
 | `ADMINISTRATOR` | Puede administrar competidores, equipos, carreras, inscripciones y resultados de cualquier carrera. Tambien puede consultar Audit Log |
-| `RACE_ORGANIZER` | Puede administrar solo las carreras de su propiedad, junto con sus inscripciones y resultados |
+| `RACE_ORGANIZER` | Puede administrar carreras de su propiedad, junto con sus inscripciones y resultados. Puede consultar competidores y equipos |
 | `VIEWER` | Tiene acceso de solo lectura a la informacion permitida por el sistema |
 
 La interfaz oculta controles no permitidos para mejorar la experiencia, pero las validaciones de autorizacion y ownership se aplican nuevamente en el backend.
@@ -414,7 +415,7 @@ Para ejecutar la solucion completa mediante Docker no es necesario iniciar manua
 Clona el repositorio y ubicate en la raiz:
 
 ```powershell
-git clone [https://github.com/navyri/camel-racing-system.git](https://github.com/navyri/camel-racing-system.git)
+git clone https://github.com/navyri/camel-racing-system.git
 Set-Location .\camel-racing-system
 ```
 
@@ -480,6 +481,7 @@ Set-Location ..
 | Health check backend | `http://localhost:8080/actuator/health` | Verificacion de disponibilidad del backend |
 | Health check frontend | `http://localhost:5173/health` | Verificacion de disponibilidad del frontend |
 | Keycloak | `http://localhost:8180` | Autenticacion, roles y consola administrativa |
+| Keycloak Admin Console | `http://localhost:8180/admin` | Administracion del realm local |
 | PostgreSQL | `localhost:5432` | Persistencia relacional |
 
 ## Instalacion y ejecucion
@@ -578,18 +580,7 @@ docker compose start frontend
 docker compose logs -f backend
 docker compose logs -f frontend
 docker compose logs -f keycloak
-```
-
-Para identificar el nombre exacto del servicio de PostgreSQL antes de consultar sus logs:
-
-```powershell
-docker compose ps
-```
-
-Luego usa el nombre que aparezca en la salida:
-
-```powershell
-docker compose logs -f <nombre-del-servicio-postgresql>
+docker compose logs -f db
 ```
 
 ### 6. Detener los servicios
@@ -619,27 +610,51 @@ seed-dark-fantasy-demo.sql
 
 Este script carga una demostracion con tematica de fantasia oscura y videojuegos, inspirada en universos como Fatal Frame, Elden Ring Nightreign, Alice: Madness y Dark Souls.
 
-La carga incluye:
+La carga crea las representaciones locales de los tres usuarios demo de Keycloak y sus roles, ademas de los datos de negocio:
 
 | Entidad | Cantidad |
 |---|---:|
-| Competidores | 8 |
+| Usuarios locales | 3 |
+| Roles | 3 |
+| Competidores | 9 |
 | Equipos | 3 |
 | Integrantes de equipos | 6 |
 | Carreras | 7 |
 | Inscripciones | 13 |
 | Resultados oficiales | 9 |
 
+La distribucion de competidores cumple el minimo solicitado:
+
+| Tipo | Cantidad |
+|---|---:|
+| `DWARF` | 5 |
+| `CAMEL` | 2 |
+| `MEDIUM` | 2 |
+
 Entre las carreras se incluyen modalidades individuales, por equipos y mixtas, junto con estados `DRAFT`, `OPEN_FOR_REGISTRATION`, `IN_PROGRESS` y `COMPLETED`.
 
 ### Ejecutar el seed
 
-El script requiere que las tablas de negocio esten vacias. Antes de ejecutarlo, confirma que no estas mezclando datos demo con informacion que necesites conservar.
+El seed debe ejecutarse contra una base de datos completamente limpia. Esto incluye las tablas de seguridad y de negocio:
+
+```text
+users
+roles
+user_roles
+competitors
+teams
+team_members
+races
+race_registrations
+race_results
+audit_logs
+```
 
 Desde la raiz del repositorio:
 
 ```powershell
-Get-Content .\seed-dark-fantasy-demo.sql | docker exec -i camel-racing-db psql -v ON_ERROR_STOP=1 -U camel_racing_user -d camel_racing_db
+Get-Content .\seed-dark-fantasy-demo.sql |
+    docker exec -i camel-racing-db psql -v ON_ERROR_STOP=1 -U camel_racing_user -d camel_racing_db
 ```
 
 Si el seed termina correctamente, debe mostrar:
@@ -648,9 +663,42 @@ Si el seed termina correctamente, debe mostrar:
 COMMIT
 ```
 
-El script valida condiciones previas y usa una transaccion. Si encuentra un error, la carga no debe quedar parcialmente aplicada.
+El comando no necesita modificarse. El script valida condiciones previas y usa una transaccion. Si encuentra un error, la carga no debe quedar parcialmente aplicada.
+
+Si necesitas borrar todos los datos locales y recargar la demostracion, ejecuta solamente si estas segura de no requerir los datos actuales:
+
+```powershell
+docker compose down -v
+docker compose up -d
+```
+
+Despues ejecuta nuevamente el comando del seed.
 
 > **Audit Log:** el seed inserta datos directamente en PostgreSQL para facilitar la preparacion de la demostracion. Por esta razon, no genera registros en `audit_logs`. Para llenar el Audit Log, realiza acciones desde la interfaz, por ejemplo aprobar, rechazar o cancelar una inscripcion, actualizar un resultado, cambiar el estado de un competidor o cancelar una carrera.
+
+### Verificar la carga
+
+Verifica los usuarios y roles:
+
+```powershell
+docker exec -it camel-racing-db psql -U camel_racing_user -d camel_racing_db -c "SELECT u.username, u.email, r.name AS role_name FROM users u JOIN user_roles ur ON ur.user_id = u.id JOIN roles r ON r.id = ur.role_id ORDER BY u.username;"
+```
+
+Verifica la distribucion de competidores:
+
+```powershell
+docker exec -it camel-racing-db psql -U camel_racing_user -d camel_racing_db -c "SELECT competitor_type, COUNT(*) AS total FROM competitors GROUP BY competitor_type ORDER BY competitor_type;"
+```
+
+Resultado esperado:
+
+```text
+ competitor_type | total
+-----------------+-------
+ CAMEL           |     2
+ DWARF           |     5
+ MEDIUM          |     2
+```
 
 ### Escenarios sugeridos para demo
 
@@ -828,7 +876,7 @@ De todas formas, deben tenerse en cuenta estas consideraciones operativas:
 
 - El entorno esta diseñado para desarrollo y demostracion local, no para despliegue productivo
 - Las cuentas demo de Keycloak son publicas dentro del contexto academico local y no deben reutilizarse fuera de este proyecto
-- El seed de demostracion requiere una base de datos de negocio limpia
+- El seed requiere una base completamente limpia, incluidas tablas de seguridad y de negocio
 - El seed carga datos directamente en PostgreSQL y, por ello, no genera eventos de Audit Log
 - El video de demostracion aun esta pendiente de agregar
 - La configuracion de servicios depende de Docker Desktop y de los puertos locales 5173, 8080, 8180 y 5432
@@ -843,15 +891,17 @@ De todas formas, deben tenerse en cuenta estas consideraciones operativas:
 - Optimizar consultas administrativas de Audit Log en escenarios con grandes volumenes de datos
 - Agregar el video de demostracion y capturas reales del sistema al repositorio
 
-## Documentacion complementaria
+## Documentación complementaria
 
 Para profundizar en cada capa del proyecto, consulta:
 
 - [Frontend: React, TypeScript y Vite](./frontend/README.md)
 - [Backend: Spring Boot, API REST y PostgreSQL](./backend/README.md)
-- [Keycloak: realm, roles y usuarios de demostracion](./keycloak/README.md)
+- [Keycloak: realm, roles y usuarios de demostración](./keycloak/README.md)
+- [Diagrama de base de datos](./docs/database-diagram.md)
+- [Informe técnico](./docs/technical-report.md)
 - [Plantilla de variables de entorno](./.env.template)
-- [Datos de demostracion](./seed-dark-fantasy-demo.sql)
+- [Datos de demostración](./seed-dark-fantasy-demo.sql)
 
 ## Notas de operacion
 

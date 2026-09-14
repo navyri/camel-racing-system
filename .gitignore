@@ -16,3 +16,6 @@ bin/
 
 application-local.yml
 application-prod.yml
+
+docs/postman/camel-racing-system.postman_collection.json
+docs/postman/camel-racing-local.postman_environment.json
