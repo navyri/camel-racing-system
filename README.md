@@ -52,10 +52,24 @@ La identidad visual del frontend sigue la direccion **Dark Desert Shrine**: una 
 
 <p align="center">
   <img
-    src="https://capsule-render.vercel.app/api?type=rect&height=110&color=e8b789&text=Video%20de%20demostracion%20pendiente&fontColor=00000&fontSize=24&fontAlignY=52"
+    src="https://capsule-render.vercel.app/api?type=rect&height=110&color=4E8B7A&text=Video%20de%20demostracion%20pendiente&fontColor=FFF4E0&fontSize=24&fontAlignY=52"
     alt="Espacio reservado para video de demostracion"
   />
 </p>
+
+<!--
+Cuando el video este disponible, reemplaza el bloque anterior por uno como este:
+
+<p align="center">
+  <a href="AQUI_VA_EL_ENLACE_DEL_VIDEO" target="_blank" rel="noopener noreferrer">
+    <img
+      src="./docs/images/video-thumbnail.png"
+      alt="Ver video de demostracion de Camel Racing System"
+      width="850"
+    />
+  </a>
+</p>
+-->
 
 <p align="center">
   <img
@@ -189,7 +203,7 @@ CANCELLED
                          +----------------------+
                          |      Frontend        |
                          | React + TypeScript   |
-                         | Vite                 |
+                         | Vite build + Nginx   |
                          | http://localhost:5173|
                          +----------+-----------+
                                     |
@@ -210,13 +224,19 @@ CANCELLED
                  +----------------+   +----------------+
 ```
 
-El frontend consume la API REST del backend. El backend concentra las reglas de negocio, persiste la informacion en PostgreSQL y valida tokens JWT emitidos por Keycloak. Docker Compose permite iniciar PostgreSQL, Keycloak y el backend como servicios locales coordinados.
+El frontend se compila con Vite y se sirve desde Nginx dentro de un contenedor Docker. El navegador consume la API REST del backend y Keycloak mediante sus URLs publicas locales. El backend concentra las reglas de negocio, persiste la informacion en PostgreSQL y valida tokens JWT emitidos por Keycloak.
+
+Docker Compose permite iniciar toda la solucion con un solo comando:
+
+```powershell
+docker compose up -d
+```
 
 ### Tecnologias utilizadas
 
 | Capa | Tecnologias |
 |---|---|
-| Frontend | React, TypeScript, Vite, CSS |
+| Frontend | React, TypeScript, Vite, Nginx, CSS |
 | Backend | Java, Spring Boot, Spring Security, Spring Data JPA, Gradle |
 | Base de datos | PostgreSQL |
 | Identidad y acceso | Keycloak, OAuth 2.0, OpenID Connect, JWT |
@@ -348,6 +368,7 @@ camel-racing-system/
 │   │   └── test/
 │   ├── build.gradle
 │   ├── gradlew.bat
+│   ├── Dockerfile
 │   └── README.md
 ├── frontend/
 │   ├── public/
@@ -362,6 +383,8 @@ camel-racing-system/
 │   ├── .env.example
 │   ├── package.json
 │   ├── vite.config.ts
+│   ├── Dockerfile
+│   ├── nginx.conf
 │   └── README.md
 ├── keycloak/
 │   ├── realm-camel-racing.json
@@ -380,11 +403,13 @@ Antes de iniciar, verifica que tienes instalado:
 |---|---|
 | Docker Desktop | Docker Engine en ejecucion |
 | Docker Compose | Incluido con Docker Desktop |
-| Node.js | Version LTS actual |
-| npm | Incluido con Node.js |
-| Java / JDK | Version compatible con el proyecto Gradle |
+| Node.js | Version LTS actual, solo para desarrollo local y pruebas |
+| npm | Incluido con Node.js, solo para desarrollo local y pruebas |
+| Java / JDK | Version compatible con el proyecto Gradle, solo para desarrollo local y pruebas |
 | Git | Necesario si vas a clonar el repositorio |
 | PowerShell | Recomendado para Windows |
+
+Para ejecutar la solucion completa mediante Docker no es necesario iniciar manualmente el backend ni el frontend. Docker construye el backend con Java y el frontend con Node durante la creacion de las imagenes.
 
 Clona el repositorio y ubicate en la raiz:
 
@@ -399,26 +424,38 @@ El proyecto usa archivos locales de entorno para separar configuracion y secreto
 
 ### Entorno principal
 
-Si vas a levantar los servicios con Docker Compose, crea el archivo local desde la plantilla:
+Crea el archivo local desde la plantilla:
 
 ```powershell
 Copy-Item .env.template .env
 ```
 
-Ajusta los valores requeridos para PostgreSQL, Spring Boot, Keycloak y administracion local de Keycloak segun tu entorno.
+El archivo `.env.template` incluye valores de desarrollo para:
+
+```text
+DB_NAME
+DB_USERNAME
+DB_PASSWORD
+DB_PORT
+BACKEND_PORT
+FRONTEND_PORT
+KEYCLOAK_PORT
+KEYCLOAK_ADMIN_USERNAME
+KEYCLOAK_ADMIN_PASSWORD
+```
 
 No publiques el archivo `.env` real ni su contenido si contiene secretos o configuracion privada.
 
-### Entorno del frontend
+### Entorno del frontend para desarrollo local
 
-Crea el archivo de configuracion del frontend:
+El contenedor frontend recibe la configuracion necesaria como build arguments desde `compose.yml`. Solo necesitas crear `frontend/.env` si deseas ejecutar Vite directamente fuera de Docker:
 
 ```powershell
 Set-Location .\frontend
 Copy-Item .env.example .env
 ```
 
-Las variables requeridas son:
+Las variables esperadas son:
 
 ```text
 VITE_API_BASE_URL=http://localhost:8080
@@ -437,26 +474,52 @@ Set-Location ..
 
 | Componente | URL o puerto | Proposito |
 |---|---|---|
-| Frontend Vite | `http://localhost:5173` | Interfaz web |
+| Frontend Nginx | `http://localhost:5173` | Interfaz web |
 | Backend Spring Boot | `http://localhost:8080` | API REST |
 | Swagger UI | `http://localhost:8080/swagger-ui/index.html` | Documentacion y pruebas de API |
-| Health check | `http://localhost:8080/actuator/health` | Verificacion de disponibilidad del backend |
+| Health check backend | `http://localhost:8080/actuator/health` | Verificacion de disponibilidad del backend |
+| Health check frontend | `http://localhost:5173/health` | Verificacion de disponibilidad del frontend |
 | Keycloak | `http://localhost:8180` | Autenticacion, roles y consola administrativa |
 | PostgreSQL | `localhost:5432` | Persistencia relacional |
 
 ## Instalacion y ejecucion
 
-### 1. Iniciar infraestructura y backend
+### 1. Configurar variables de entorno
 
 Desde la raiz del repositorio:
+
+```powershell
+Copy-Item .env.template .env
+```
+
+No reemplaces el archivo si ya tienes un `.env` local funcional, a menos que quieras reiniciar tu configuracion.
+
+### 2. Iniciar la solucion completa
+
+Desde la raiz del repositorio:
+
+```powershell
+docker compose up -d
+```
+
+Docker Compose construye e inicia todos los componentes necesarios:
+
+```text
+camel-racing-db
+camel-racing-keycloak
+camel-racing-backend
+camel-racing-frontend
+```
+
+La primera ejecucion puede tardar varios minutos porque Docker descarga imagenes, construye el backend, compila el frontend y crea los contenedores.
+
+Si cambias el codigo o necesitas reconstruir imagenes, ejecuta:
 
 ```powershell
 docker compose up -d --build
 ```
 
-La primera ejecucion puede tardar varios minutos porque Docker debe descargar imagenes, construir el backend e iniciar PostgreSQL, Keycloak y Spring Boot.
-
-Verifica los contenedores:
+### 3. Verificar servicios
 
 ```powershell
 docker compose ps
@@ -468,12 +531,10 @@ Verifica la salud del backend:
 Invoke-WebRequest -UseBasicParsing http://localhost:8080/actuator/health
 ```
 
-La respuesta esperada debe indicar que el servicio esta disponible:
+Verifica la salud del frontend:
 
-```json
-{
-  "status": "UP"
-}
+```powershell
+Invoke-WebRequest -UseBasicParsing http://localhost:5173/health
 ```
 
 Verifica la configuracion OIDC de Keycloak:
@@ -482,10 +543,40 @@ Verifica la configuracion OIDC de Keycloak:
 Invoke-WebRequest -UseBasicParsing http://localhost:8180/realms/camel-racing/.well-known/openid-configuration
 ```
 
-Si algun servicio presenta problemas, consulta los logs:
+Abre la aplicacion en el navegador:
+
+```text
+http://localhost:5173
+```
+
+### 4. Desarrollo local del frontend
+
+Para desarrollar con hot reload sin reconstruir la imagen Docker, puedes ejecutar Vite manualmente en otra terminal:
+
+```powershell
+Set-Location .\frontend
+npm install
+npm run dev
+```
+
+Antes de iniciar Vite manualmente, detiene el servicio frontend Docker para liberar el puerto `5173`:
+
+```powershell
+Set-Location ..
+docker compose stop frontend
+```
+
+Cuando quieras regresar al contenedor:
+
+```powershell
+docker compose start frontend
+```
+
+### 5. Consultar logs
 
 ```powershell
 docker compose logs -f backend
+docker compose logs -f frontend
 docker compose logs -f keycloak
 ```
 
@@ -501,31 +592,9 @@ Luego usa el nombre que aparezca en la salida:
 docker compose logs -f <nombre-del-servicio-postgresql>
 ```
 
-### 2. Iniciar el frontend
+### 6. Detener los servicios
 
-Abre una segunda terminal de PowerShell.
-
-Desde la raiz del repositorio:
-
-```powershell
-Set-Location .\frontend
-npm install
-npm run dev
-```
-
-Vite mostrara una URL similar a:
-
-```text
-http://localhost:5173
-```
-
-Abre esa direccion en el navegador.
-
-> El frontend depende de que backend y Keycloak ya esten disponibles. Por eso se recomienda iniciar primero Docker Compose y luego Vite.
-
-### 3. Detener los servicios
-
-Para detener los contenedores sin eliminar los datos persistidos:
+Para detener los contenedores sin eliminar datos persistidos:
 
 ```powershell
 docker compose down
@@ -724,10 +793,11 @@ BUILD SUCCESSFUL
 
 ### Verificacion local de servicios
 
-PowerShell se utiliza para verificar la disponibilidad del backend y de Keycloak:
+PowerShell se utiliza para verificar la disponibilidad del backend, frontend y Keycloak:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing http://localhost:8080/actuator/health
+Invoke-WebRequest -UseBasicParsing http://localhost:5173/health
 Invoke-WebRequest -UseBasicParsing http://localhost:8180/realms/camel-racing/.well-known/openid-configuration
 ```
 
@@ -761,7 +831,7 @@ De todas formas, deben tenerse en cuenta estas consideraciones operativas:
 - El seed de demostracion requiere una base de datos de negocio limpia
 - El seed carga datos directamente en PostgreSQL y, por ello, no genera eventos de Audit Log
 - El video de demostracion aun esta pendiente de agregar
-- La configuracion de servicios depende de que Docker Desktop, PostgreSQL, Keycloak, backend y frontend esten disponibles en el orden indicado
+- La configuracion de servicios depende de Docker Desktop y de los puertos locales 5173, 8080, 8180 y 5432
 
 ## Mejoras futuras
 

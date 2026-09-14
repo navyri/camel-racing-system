@@ -38,7 +38,11 @@ services:
     networks:
       - camel_racing_network
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"]
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'",
+        ]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -72,7 +76,35 @@ services:
     networks:
       - camel_racing_network
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q 'UP'"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://localhost:8080/actuator/health | grep -q 'UP'",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:${BACKEND_PORT:-8080}
+        VITE_KEYCLOAK_URL: http://localhost:${KEYCLOAK_PORT:-8180}
+        VITE_KEYCLOAK_REALM: camel-racing
+        VITE_KEYCLOAK_CLIENT_ID: camel-racing-frontend
+    container_name: camel-racing-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    networks:
+      - camel_racing_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/health | grep -q 'UP'"]
       interval: 15s
       timeout: 5s
       retries: 10
