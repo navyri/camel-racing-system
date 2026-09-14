@@ -1,7 +1,8 @@
 package com.eia.camelracing.competitor.controller;
 
-import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
@@ -11,7 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -97,10 +98,19 @@ class CompetitorControllerTest {
                 }
 
                 @Test
-                @DisplayName("returns 401 when request has no token")
-                void returnsUnauthorizedWithoutToken() throws Exception {
+                @DisplayName("returns structured unauthorized response without token")
+                void returnsStructuredUnauthorizedResponseWithoutToken() throws Exception {
                         mockMvc.perform(get("/api/competitors"))
-                                        .andExpect(status().isUnauthorized());
+                                        .andExpect(status().isUnauthorized())
+                                        .andExpect(content().contentTypeCompatibleWith("application/json"))
+                                        .andExpect(jsonPath("$.status", is(401)))
+                                        .andExpect(jsonPath("$.error", is("Unauthorized")))
+                                        .andExpect(jsonPath(
+                                                        "$.message",
+                                                        is("Authentication is required to access this resource")))
+                                        .andExpect(jsonPath("$.path", is("/api/competitors")))
+                                        .andExpect(jsonPath("$.timestamp", notNullValue()))
+                                        .andExpect(jsonPath("$.validationErrors").doesNotExist());
                 }
         }
 

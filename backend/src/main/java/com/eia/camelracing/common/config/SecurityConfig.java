@@ -4,6 +4,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
+import com.eia.camelracing.common.security.ApiAccessDeniedHandler;
+import com.eia.camelracing.common.security.ApiAuthenticationEntryPoint;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
@@ -26,7 +29,10 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class SecurityConfig {
 
         @Bean
-        public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        public SecurityFilterChain securityFilterChain(
+                        HttpSecurity http,
+                        ApiAuthenticationEntryPoint apiAuthenticationEntryPoint,
+                        ApiAccessDeniedHandler apiAccessDeniedHandler) throws Exception {
                 http
                                 .cors(Customizer.withDefaults())
                                 .csrf(csrf -> csrf.disable())
@@ -76,13 +82,28 @@ public class SecurityConfig {
                                                 .requestMatchers(HttpMethod.GET, "/api/**")
                                                 .hasAnyRole("ADMINISTRATOR", "RACE_ORGANIZER", "VIEWER")
                                                 .anyRequest().authenticated())
+                                .exceptionHandling(exceptionHandling -> exceptionHandling
+                                                .authenticationEntryPoint(apiAuthenticationEntryPoint)
+                                                .accessDeniedHandler(apiAccessDeniedHandler))
                                 .oauth2ResourceServer(oauth2 -> oauth2
+                                                .authenticationEntryPoint(apiAuthenticationEntryPoint)
+                                                .accessDeniedHandler(apiAccessDeniedHandler)
                                                 .jwt(jwt -> jwt.jwtAuthenticationConverter(
                                                                 jwtAuthenticationConverter())))
                                 .headers(headers -> headers
                                                 .frameOptions(frameOptions -> frameOptions.sameOrigin()));
 
                 return http.build();
+        }
+
+        @Bean
+        public ApiAuthenticationEntryPoint apiAuthenticationEntryPoint() {
+                return new ApiAuthenticationEntryPoint();
+        }
+
+        @Bean
+        public ApiAccessDeniedHandler apiAccessDeniedHandler() {
+                return new ApiAccessDeniedHandler();
         }
 
         @Bean

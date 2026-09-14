@@ -85,6 +85,53 @@ class RaceResultControllerTest {
         }
 
         @Nested
+        @DisplayName("GET /api/results/recent")
+        class GetRecentResults {
+
+                @Test
+                @DisplayName("viewer can list recently recorded results")
+                void viewerCanListRecentlyRecordedResults() throws Exception {
+                        UUID raceId = UUID.randomUUID();
+
+                        when(resultService.getRecentResults(5))
+                                        .thenReturn(List.of(response(raceId)));
+
+                        mockMvc.perform(get("/api/results/recent")
+                                        .param("limit", "5")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_VIEWER"))))
+                                        .andExpect(status().isOk())
+                                        .andExpect(jsonPath("$", hasSize(1)))
+                                        .andExpect(jsonPath("$[0].raceId", is(raceId.toString())))
+                                        .andExpect(jsonPath("$[0].status", is("FINISHED")))
+                                        .andExpect(jsonPath("$[0].finalPosition", is(1)));
+
+                        verify(resultService).getRecentResults(5);
+                }
+
+                @Test
+                @DisplayName("viewer can use default recent result limit")
+                void viewerCanUseDefaultRecentResultLimit() throws Exception {
+                        when(resultService.getRecentResults(null)).thenReturn(List.of());
+
+                        mockMvc.perform(get("/api/results/recent")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_VIEWER"))))
+                                        .andExpect(status().isOk())
+                                        .andExpect(jsonPath("$", hasSize(0)));
+
+                        verify(resultService).getRecentResults(null);
+                }
+
+                @Test
+                @DisplayName("returns unauthorized without token")
+                void returnsUnauthorizedWithoutToken() throws Exception {
+                        mockMvc.perform(get("/api/results/recent"))
+                                        .andExpect(status().isUnauthorized());
+                }
+        }
+
+        @Nested
         @DisplayName("GET /api/results/{id}")
         class GetResultById {
 

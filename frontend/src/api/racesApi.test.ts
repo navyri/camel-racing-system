@@ -17,6 +17,7 @@ const {
     createRace,
     getRaceById,
     getRaces,
+    getUpcomingRaces,
     updateRace,
     updateRaceStatus,
 } = await import('./racesApi')
@@ -105,7 +106,7 @@ describe('racesApi', () => {
             page: 0,
             size: 50,
             sort: 'createdAt,asc',
-            search: '   ',
+            search: ' ',
         })
 
         expect(apiClient).toHaveBeenCalledWith(
@@ -114,6 +115,26 @@ describe('racesApi', () => {
                 method: 'GET',
             },
         )
+    })
+
+    it('gets upcoming races with the default limit', async () => {
+        apiClient.mockResolvedValueOnce([raceResponse])
+
+        await expect(getUpcomingRaces()).resolves.toEqual([raceResponse])
+
+        expect(apiClient).toHaveBeenCalledWith('/api/races/upcoming?limit=5', {
+            method: 'GET',
+        })
+    })
+
+    it('gets upcoming races with a custom limit', async () => {
+        apiClient.mockResolvedValueOnce([raceResponse])
+
+        await expect(getUpcomingRaces(3)).resolves.toEqual([raceResponse])
+
+        expect(apiClient).toHaveBeenCalledWith('/api/races/upcoming?limit=3', {
+            method: 'GET',
+        })
     })
 
     it('gets a race by id', async () => {

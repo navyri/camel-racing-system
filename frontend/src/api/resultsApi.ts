@@ -16,6 +16,12 @@ export function getResultsByRaceId(
     )
 }
 
+export function getRecentResults(limit = 5): Promise<RaceResultResponse[]> {
+    return apiClient<RaceResultResponse[]>(`/api/results/recent?limit=${limit}`, {
+        method: 'GET',
+    })
+}
+
 export function getResultById(
     resultId: string,
 ): Promise<RaceResultResponse> {

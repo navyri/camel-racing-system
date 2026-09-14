@@ -47,9 +47,16 @@ public class RaceService {
     private static final List<RegistrationStatus> APPROVED_REGISTRATION_STATUSES = List.of(
             RegistrationStatus.APPROVED);
 
+    private static final List<RaceStatus> UPCOMING_EXCLUDED_STATUSES = List.of(
+            RaceStatus.COMPLETED,
+            RaceStatus.CANCELLED);
+
     private static final int DEFAULT_PAGE = 0;
     private static final int DEFAULT_SIZE = 10;
     private static final int MAX_SIZE = 100;
+
+    private static final int DEFAULT_UPCOMING_LIMIT = 5;
+    private static final int MAX_UPCOMING_LIMIT = 100;
 
     private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
             "name",
@@ -95,6 +102,19 @@ public class RaceService {
                 pageable).map(RaceMapper::toResponse);
 
         return PageResponse.from(races);
+    }
+
+    @Transactional(readOnly = true)
+    public List<RaceResponse> getUpcomingRaces(Integer limit) {
+        int resolvedLimit = resolveUpcomingLimit(limit);
+        Pageable pageable = PageRequest.of(0, resolvedLimit, Sort.by("scheduledAt").ascending());
+
+        return raceRepository.findUpcomingRaces(
+                LocalDateTime.now(),
+                UPCOMING_EXCLUDED_STATUSES,
+                pageable).stream()
+                .map(RaceMapper::toResponse)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -289,6 +309,17 @@ public class RaceService {
         }
 
         return PageRequest.of(resolvedPage, resolvedSize, buildSort(sort));
+    }
+
+    private int resolveUpcomingLimit(Integer limit) {
+        int resolvedLimit = limit == null ? DEFAULT_UPCOMING_LIMIT : limit;
+
+        if (resolvedLimit < 1 || resolvedLimit > MAX_UPCOMING_LIMIT) {
+            throw new IllegalArgumentException(
+                    "Limit must be between 1 and " + MAX_UPCOMING_LIMIT);
+        }
+
+        return resolvedLimit;
     }
 
     private Sort buildSort(String sort) {
