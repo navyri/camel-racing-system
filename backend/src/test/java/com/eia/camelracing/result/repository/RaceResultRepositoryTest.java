@@ -93,47 +93,48 @@ class RaceResultRepositoryTest {
         }
 
         @Test
-        void shouldFindExistingRegistrationAndFinishedPositionForRace() {
-                RaceRegistration registration = saveIndividualRegistration(competitor, baseTime);
-                RaceResult result = saveResult(
-                                registration,
+        void shouldFindExistingRegistrationResultAndDetailedFinishedResults() {
+                RaceRegistration finishedRegistration = saveIndividualRegistration(competitor, baseTime);
+                RaceResult finishedResult = saveResult(
+                                finishedRegistration,
                                 WINNER_POSITION,
                                 ResultStatus.FINISHED,
                                 baseTime.plusMinutes(10));
 
-                boolean hasRegistrationResult = raceResultRepository.existsByRegistrationId(registration.getId());
+                Team didNotFinishTeam = teamRepository.save(createTeam("Oasis Runners"));
+                RaceRegistration didNotFinishRegistration = saveTeamRegistration(
+                                didNotFinishTeam,
+                                baseTime.plusMinutes(1));
+                saveResult(
+                                didNotFinishRegistration,
+                                null,
+                                ResultStatus.DID_NOT_FINISH,
+                                baseTime.plusMinutes(11));
 
-                boolean hasFinishedWinnerPosition = raceResultRepository
-                                .existsByRegistration_Race_IdAndFinalPositionAndStatus(
-                                                race.getId(),
-                                                WINNER_POSITION,
-                                                ResultStatus.FINISHED);
+                entityManager.flush();
+                entityManager.clear();
 
-                boolean hasDifferentFinishedPosition = raceResultRepository
-                                .existsByRegistration_Race_IdAndFinalPositionAndStatus(
-                                                race.getId(),
-                                                SECOND_POSITION,
-                                                ResultStatus.FINISHED);
+                boolean hasRegistrationResult = raceResultRepository.existsByRegistrationId(
+                                finishedRegistration.getId());
 
-                boolean hasPositionExcludingCurrentResult = raceResultRepository
-                                .existsByRegistration_Race_IdAndFinalPositionAndStatusAndIdNot(
-                                                race.getId(),
-                                                WINNER_POSITION,
-                                                ResultStatus.FINISHED,
-                                                result.getId());
+                List<RaceResult> finishedResults = raceResultRepository.findDetailedFinishedByRaceId(
+                                race.getId(),
+                                ResultStatus.FINISHED);
 
-                boolean hasPositionIncludingDifferentResult = raceResultRepository
-                                .existsByRegistration_Race_IdAndFinalPositionAndStatusAndIdNot(
-                                                race.getId(),
-                                                WINNER_POSITION,
-                                                ResultStatus.FINISHED,
-                                                UUID.randomUUID());
+                PersistenceUnitUtil persistenceUnitUtil = entityManager
+                                .getEntityManagerFactory()
+                                .getPersistenceUnitUtil();
 
                 assertThat(hasRegistrationResult).isTrue();
-                assertThat(hasFinishedWinnerPosition).isTrue();
-                assertThat(hasDifferentFinishedPosition).isFalse();
-                assertThat(hasPositionExcludingCurrentResult).isFalse();
-                assertThat(hasPositionIncludingDifferentResult).isTrue();
+                assertThat(finishedResults)
+                                .extracting(RaceResult::getId)
+                                .containsExactly(finishedResult.getId());
+                assertThat(persistenceUnitUtil.isLoaded(finishedResults.get(0).getRegistration())).isTrue();
+                assertThat(persistenceUnitUtil.isLoaded(
+                                finishedResults.get(0).getRegistration().getRace())).isTrue();
+                assertThat(persistenceUnitUtil.isLoaded(
+                                finishedResults.get(0).getRegistration().getCompetitor())).isTrue();
+                assertThat(persistenceUnitUtil.isLoaded(finishedResults.get(0).getRecordedBy())).isTrue();
         }
 
         @Test

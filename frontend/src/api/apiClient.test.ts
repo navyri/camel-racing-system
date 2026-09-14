@@ -78,7 +78,7 @@ describe('apiClient', () => {
         })
     })
 
-    it('does not request a token for public calls', async () => {
+    it('does not request a token for explicitly public calls', async () => {
         vi.spyOn(globalThis, 'fetch').mockResolvedValue(
             new Response(JSON.stringify([]), {
                 status: 200,
@@ -89,7 +89,7 @@ describe('apiClient', () => {
         )
 
         await expect(
-            apiClient('/api/standings', {
+            apiClient('/api/public-status', {
                 requiresAuth: false,
             }),
         ).resolves.toEqual([])

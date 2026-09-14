@@ -26,8 +26,8 @@ import org.junit.jupiter.api.Test;
 class RaceRegistrationMapperTest {
 
     @Test
-    @DisplayName("maps individual registration to response")
-    void mapsIndividualRegistrationToResponse() {
+    @DisplayName("maps pending individual registration without starting position to response")
+    void mapsPendingIndividualRegistrationWithoutStartingPositionToResponse() {
         UUID registrationId = UUID.randomUUID();
         UUID raceId = UUID.randomUUID();
         UUID competitorId = UUID.randomUUID();
@@ -43,7 +43,7 @@ class RaceRegistrationMapperTest {
                 .competitor(competitor)
                 .registeredAt(registeredAt)
                 .status(RegistrationStatus.PENDING)
-                .startingPosition(1)
+                .startingPosition(null)
                 .validationNotes("Pending validation")
                 .registeredBy(organizer)
                 .build();
@@ -59,15 +59,15 @@ class RaceRegistrationMapperTest {
         assertThat(response.teamName()).isNull();
         assertThat(response.registeredAt()).isEqualTo(registeredAt);
         assertThat(response.status()).isEqualTo(RegistrationStatus.PENDING);
-        assertThat(response.startingPosition()).isEqualTo(1);
+        assertThat(response.startingPosition()).isNull();
         assertThat(response.validationNotes()).isEqualTo("Pending validation");
         assertThat(response.registeredByUserId()).isEqualTo(organizer.getId());
         assertThat(response.registeredByUsername()).isEqualTo("organizer");
     }
 
     @Test
-    @DisplayName("maps team registration to response")
-    void mapsTeamRegistrationToResponse() {
+    @DisplayName("maps approved team registration to response")
+    void mapsApprovedTeamRegistrationToResponse() {
         UUID registrationId = UUID.randomUUID();
         UUID raceId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();

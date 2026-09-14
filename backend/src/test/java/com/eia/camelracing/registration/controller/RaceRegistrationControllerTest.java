@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -22,6 +23,7 @@ import java.util.UUID;
 import com.eia.camelracing.common.config.SecurityConfig;
 import com.eia.camelracing.registration.dto.RaceRegistrationRequest;
 import com.eia.camelracing.registration.dto.RaceRegistrationResponse;
+import com.eia.camelracing.registration.dto.RegistrationApprovalRequest;
 import com.eia.camelracing.registration.dto.RegistrationRejectRequest;
 import com.eia.camelracing.registration.entity.RegistrationStatus;
 import com.eia.camelracing.registration.service.RaceRegistrationService;
@@ -105,7 +107,7 @@ class RaceRegistrationControllerTest {
                                         null,
                                         LocalDateTime.now(),
                                         RegistrationStatus.PENDING,
-                                        1,
+                                        null,
                                         null,
                                         UUID.randomUUID(),
                                         "organizer");
@@ -130,8 +132,8 @@ class RaceRegistrationControllerTest {
         class CreateRegistration {
 
                 @Test
-                @DisplayName("organizer can create registration")
-                void organizerCanCreateRegistration() throws Exception {
+                @DisplayName("organizer can create registration without starting position")
+                void organizerCanCreateRegistrationWithoutStartingPosition() throws Exception {
                         UUID raceId = UUID.randomUUID();
 
                         when(registrationService.createRegistration(
@@ -144,8 +146,8 @@ class RaceRegistrationControllerTest {
                                         .contentType("application/json")
                                         .content("""
                                                         {
-                                                          "competitorId": "11111111-1111-1111-1111-111111111111",
-                                                          "startingPosition": 1
+                                                                "competitorId": "11111111-1111-1111-1111-111111111111",
+                                                                "startingPosition": null
                                                         }
                                                         """))
                                         .andExpect(status().isCreated())
@@ -165,7 +167,7 @@ class RaceRegistrationControllerTest {
                                         .contentType("application/json")
                                         .content("""
                                                         {
-                                                          "competitorId": "11111111-1111-1111-1111-111111111111"
+                                                                "competitorId": "11111111-1111-1111-1111-111111111111"
                                                         }
                                                         """))
                                         .andExpect(status().isForbidden());
@@ -182,7 +184,7 @@ class RaceRegistrationControllerTest {
                                         .contentType("application/json")
                                         .content("""
                                                         {
-                                                          "startingPosition": 1
+                                                                "startingPosition": null
                                                         }
                                                         """))
                                         .andExpect(status().isBadRequest());
@@ -194,8 +196,8 @@ class RaceRegistrationControllerTest {
         class ApproveRegistration {
 
                 @Test
-                @DisplayName("organizer can approve registration")
-                void organizerCanApproveRegistration() throws Exception {
+                @DisplayName("organizer can approve registration with starting position")
+                void organizerCanApproveRegistrationWithStartingPosition() throws Exception {
                         UUID registrationId = UUID.randomUUID();
                         UUID raceId = UUID.randomUUID();
 
@@ -214,18 +216,70 @@ class RaceRegistrationControllerTest {
                                         UUID.randomUUID(),
                                         "organizer");
 
-                        when(registrationService.approveRegistration(registrationId))
+                        when(registrationService.approveRegistration(
+                                        eq(registrationId),
+                                        argThat(request -> request.startingPosition() == 1)))
                                         .thenReturn(approvedResponse);
 
                         mockMvc.perform(patch("/api/registrations/" + registrationId + "/approve")
                                         .with(jwt().authorities(
-                                                        new SimpleGrantedAuthority("ROLE_RACE_ORGANIZER"))))
+                                                        new SimpleGrantedAuthority("ROLE_RACE_ORGANIZER")))
+                                        .contentType("application/json")
+                                        .content("""
+                                                        {
+                                                                "startingPosition": 1
+                                                        }
+                                                        """))
                                         .andExpect(status().isOk())
                                         .andExpect(jsonPath("$.id", is(registrationId.toString())))
                                         .andExpect(jsonPath("$.raceId", is(raceId.toString())))
-                                        .andExpect(jsonPath("$.status", is("APPROVED")));
+                                        .andExpect(jsonPath("$.status", is("APPROVED")))
+                                        .andExpect(jsonPath("$.startingPosition", is(1)));
 
-                        verify(registrationService).approveRegistration(registrationId);
+                        verify(registrationService).approveRegistration(
+                                        eq(registrationId),
+                                        argThat(request -> request.startingPosition() == 1));
+                }
+
+                @Test
+                @DisplayName("returns bad request when approval position is missing")
+                void returnsBadRequestWhenApprovalPositionIsMissing() throws Exception {
+                        UUID registrationId = UUID.randomUUID();
+
+                        mockMvc.perform(patch("/api/registrations/" + registrationId + "/approve")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_RACE_ORGANIZER")))
+                                        .contentType("application/json")
+                                        .content("""
+                                                        {
+                                                        }
+                                                        """))
+                                        .andExpect(status().isBadRequest());
+
+                        verify(registrationService, never()).approveRegistration(
+                                        eq(registrationId),
+                                        any(RegistrationApprovalRequest.class));
+                }
+
+                @Test
+                @DisplayName("returns bad request when approval position is not positive")
+                void returnsBadRequestWhenApprovalPositionIsNotPositive() throws Exception {
+                        UUID registrationId = UUID.randomUUID();
+
+                        mockMvc.perform(patch("/api/registrations/" + registrationId + "/approve")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_RACE_ORGANIZER")))
+                                        .contentType("application/json")
+                                        .content("""
+                                                        {
+                                                                "startingPosition": 0
+                                                        }
+                                                        """))
+                                        .andExpect(status().isBadRequest());
+
+                        verify(registrationService, never()).approveRegistration(
+                                        eq(registrationId),
+                                        any(RegistrationApprovalRequest.class));
                 }
 
                 @Test
@@ -235,11 +289,18 @@ class RaceRegistrationControllerTest {
 
                         mockMvc.perform(patch("/api/registrations/" + registrationId + "/approve")
                                         .with(jwt().authorities(
-                                                        new SimpleGrantedAuthority("ROLE_VIEWER"))))
+                                                        new SimpleGrantedAuthority("ROLE_VIEWER")))
+                                        .contentType("application/json")
+                                        .content("""
+                                                        {
+                                                                "startingPosition": 1
+                                                        }
+                                                        """))
                                         .andExpect(status().isForbidden());
 
-                        verify(registrationService, org.mockito.Mockito.never())
-                                        .approveRegistration(registrationId);
+                        verify(registrationService, never()).approveRegistration(
+                                        eq(registrationId),
+                                        any(RegistrationApprovalRequest.class));
                 }
         }
 
@@ -264,7 +325,7 @@ class RaceRegistrationControllerTest {
                                         null,
                                         LocalDateTime.now(),
                                         RegistrationStatus.REJECTED,
-                                        1,
+                                        null,
                                         reason,
                                         UUID.randomUUID(),
                                         "organizer");
@@ -280,7 +341,7 @@ class RaceRegistrationControllerTest {
                                         .contentType("application/json")
                                         .content("""
                                                         {
-                                                          "reason": "Participant is not eligible"
+                                                                "reason": "Participant is not eligible"
                                                         }
                                                         """))
                                         .andExpect(status().isOk())
@@ -304,12 +365,12 @@ class RaceRegistrationControllerTest {
                                         .contentType("application/json")
                                         .content("""
                                                         {
-                                                          "reason": ""
+                                                                "reason": ""
                                                         }
                                                         """))
                                         .andExpect(status().isBadRequest());
 
-                        verify(registrationService, org.mockito.Mockito.never())
+                        verify(registrationService, never())
                                         .rejectRegistration(
                                                         eq(registrationId),
                                                         any(RegistrationRejectRequest.class));
@@ -343,7 +404,7 @@ class RaceRegistrationControllerTest {
                                                         new SimpleGrantedAuthority("ROLE_VIEWER"))))
                                         .andExpect(status().isForbidden());
 
-                        verify(registrationService, org.mockito.Mockito.never())
+                        verify(registrationService, never())
                                         .cancelRegistration(registrationId);
                 }
         }
@@ -359,7 +420,7 @@ class RaceRegistrationControllerTest {
                                 null,
                                 LocalDateTime.now(),
                                 RegistrationStatus.PENDING,
-                                1,
+                                null,
                                 null,
                                 UUID.randomUUID(),
                                 "organizer");

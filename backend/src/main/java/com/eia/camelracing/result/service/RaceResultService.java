@@ -2,8 +2,12 @@ package com.eia.camelracing.result.service;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.UUID;
 
 import com.eia.camelracing.audit.service.AuditLogService;
@@ -48,6 +52,12 @@ public class RaceResultService {
             ResultStatus.DID_NOT_FINISH,
             ResultStatus.DISQUALIFIED);
 
+    private static final Comparator<RaceResult> FINISHED_RESULT_COMPARATOR = Comparator
+            .comparing(RaceResult::getCompletionTime)
+            .thenComparing(RaceResult::getPenaltyTime)
+            .thenComparing(RaceResult::getRecordedAt)
+            .thenComparing(RaceResult::getId);
+
     private final RaceResultRepository resultRepository;
     private final RaceRegistrationRepository registrationRepository;
     private final RaceRepository raceRepository;
@@ -74,17 +84,14 @@ public class RaceResultService {
         }
 
         ResultValues resultValues = resolveResultValues(
-                race.getId(),
-                request.finalPosition(),
                 request.completionTimeSeconds(),
                 request.penaltyTimeSeconds(),
-                request.status(),
-                null);
+                request.status());
 
         RaceResult result = RaceResult.builder()
                 .registration(registration)
                 .startingPosition(registration.getStartingPosition())
-                .finalPosition(resultValues.finalPosition())
+                .finalPosition(null)
                 .completionTime(resultValues.completionTime())
                 .penaltyTime(resultValues.penaltyTime())
                 .status(request.status())
@@ -94,7 +101,12 @@ public class RaceResultService {
                 .build();
 
         RaceResult savedResult = resultRepository.save(result);
-        recalculateStatistics(savedResult.getRegistration());
+
+        List<RaceResult> affectedResults = new ArrayList<>(
+                recalculateFinalPositions(race.getId()));
+        affectedResults.add(savedResult);
+
+        recalculateStatisticsForResults(affectedResults);
 
         return RaceResultMapper.toResponse(savedResult);
     }
@@ -129,21 +141,26 @@ public class RaceResultService {
         String previousValue = resultSnapshot(result);
 
         ResultValues resultValues = resolveResultValues(
-                race.getId(),
-                request.finalPosition(),
                 request.completionTimeSeconds(),
                 request.penaltyTimeSeconds(),
-                request.status(),
-                result.getId());
+                request.status());
 
-        result.setFinalPosition(resultValues.finalPosition());
         result.setCompletionTime(resultValues.completionTime());
         result.setPenaltyTime(resultValues.penaltyTime());
         result.setStatus(request.status());
         result.setNotes(normalizeNotes(request.notes()));
 
+        if (request.status() != ResultStatus.FINISHED) {
+            result.setFinalPosition(null);
+        }
+
         RaceResult savedResult = resultRepository.save(result);
-        recalculateStatistics(savedResult.getRegistration());
+
+        List<RaceResult> affectedResults = new ArrayList<>(
+                recalculateFinalPositions(race.getId()));
+        affectedResults.add(savedResult);
+
+        recalculateStatisticsForResults(affectedResults);
 
         auditLogService.log(
                 currentUser,
@@ -176,18 +193,11 @@ public class RaceResultService {
     }
 
     private ResultValues resolveResultValues(
-            UUID raceId,
-            Integer finalPosition,
             Long completionTimeSeconds,
             Long penaltyTimeSeconds,
-            ResultStatus status,
-            UUID currentResultId) {
+            ResultStatus status) {
         if (status != ResultStatus.FINISHED) {
-            return new ResultValues(null, Duration.ZERO, Duration.ZERO);
-        }
-
-        if (finalPosition == null) {
-            throw new ConflictException("Finished results require a final position");
+            return new ResultValues(Duration.ZERO, Duration.ZERO);
         }
 
         if (completionTimeSeconds == null || completionTimeSeconds <= 0) {
@@ -198,34 +208,52 @@ public class RaceResultService {
             throw new ConflictException("Finished results require a zero or positive penalty time");
         }
 
-        boolean duplicatedPosition = currentResultId == null
-                ? resultRepository.existsByRegistration_Race_IdAndFinalPositionAndStatus(
-                        raceId,
-                        finalPosition,
-                        ResultStatus.FINISHED)
-                : resultRepository.existsByRegistration_Race_IdAndFinalPositionAndStatusAndIdNot(
-                        raceId,
-                        finalPosition,
-                        ResultStatus.FINISHED,
-                        currentResultId);
-
-        if (duplicatedPosition) {
-            throw new ConflictException("Final position is already assigned to another finished result");
-        }
-
         return new ResultValues(
-                finalPosition,
                 Duration.ofSeconds(completionTimeSeconds),
                 Duration.ofSeconds(penaltyTimeSeconds));
     }
 
-    private void recalculateStatistics(RaceRegistration registration) {
-        if (registration.getCompetitor() != null) {
-            recalculateCompetitorStatistics(registration.getCompetitor());
-            return;
+    private List<RaceResult> recalculateFinalPositions(UUID raceId) {
+        List<RaceResult> finishedResults = resultRepository.findDetailedFinishedByRaceId(
+                raceId,
+                ResultStatus.FINISHED);
+
+        finishedResults.sort(FINISHED_RESULT_COMPARATOR);
+
+        for (int index = 0; index < finishedResults.size(); index++) {
+            finishedResults.get(index).setFinalPosition(index + 1);
         }
 
-        recalculateTeamStatistics(registration.getTeam());
+        if (!finishedResults.isEmpty()) {
+            resultRepository.saveAll(finishedResults);
+        }
+
+        return finishedResults;
+    }
+
+    private void recalculateStatisticsForResults(List<RaceResult> results) {
+        Set<UUID> competitorIds = new HashSet<>();
+        Set<UUID> teamIds = new HashSet<>();
+
+        for (RaceResult result : results) {
+            RaceRegistration registration = result.getRegistration();
+
+            if (registration.getCompetitor() != null) {
+                competitorIds.add(registration.getCompetitor().getId());
+            } else if (registration.getTeam() != null) {
+                teamIds.add(registration.getTeam().getId());
+            }
+        }
+
+        for (UUID competitorId : competitorIds) {
+            competitorRepository.findById(competitorId)
+                    .ifPresent(this::recalculateCompetitorStatistics);
+        }
+
+        for (UUID teamId : teamIds) {
+            teamRepository.findById(teamId)
+                    .ifPresent(this::recalculateTeamStatistics);
+        }
     }
 
     private void recalculateCompetitorStatistics(Competitor competitor) {
@@ -337,7 +365,6 @@ public class RaceResultService {
     }
 
     private record ResultValues(
-            Integer finalPosition,
             Duration completionTime,
             Duration penaltyTime) {
     }

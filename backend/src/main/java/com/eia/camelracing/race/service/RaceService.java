@@ -18,6 +18,8 @@ import com.eia.camelracing.race.entity.RaceStatus;
 import com.eia.camelracing.race.entity.RaceType;
 import com.eia.camelracing.race.mapper.RaceMapper;
 import com.eia.camelracing.race.repository.RaceRepository;
+import com.eia.camelracing.registration.entity.RegistrationStatus;
+import com.eia.camelracing.registration.repository.RaceRegistrationRepository;
 import com.eia.camelracing.result.entity.ResultStatus;
 import com.eia.camelracing.result.repository.RaceResultRepository;
 import com.eia.camelracing.user.entity.User;
@@ -28,6 +30,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +42,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class RaceService {
 
     private static final int WINNER_POSITION = 1;
+    private static final int MINIMUM_APPROVED_PARTICIPANTS = 2;
+
+    private static final List<RegistrationStatus> APPROVED_REGISTRATION_STATUSES = List.of(
+            RegistrationStatus.APPROVED);
 
     private static final int DEFAULT_PAGE = 0;
     private static final int DEFAULT_SIZE = 10;
@@ -50,6 +60,7 @@ public class RaceService {
             "maxParticipants");
 
     private final RaceRepository raceRepository;
+    private final RaceRegistrationRepository registrationRepository;
     private final RaceResultRepository resultRepository;
     private final CurrentUserService currentUserService;
     private final AuditLogService auditLogService;
@@ -94,6 +105,9 @@ public class RaceService {
     @Transactional
     public RaceResponse updateRace(UUID id, RaceRequest request) {
         Race race = findRaceById(id);
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+        validateRaceManagementPermission(race, currentUser);
 
         if (isTerminal(race.getStatus())) {
             throw new ConflictException("Terminal races cannot be updated");
@@ -108,8 +122,11 @@ public class RaceService {
     @Transactional
     public RaceResponse updateRaceStatus(UUID id, RaceStatusRequest request) {
         Race race = findRaceById(id);
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
 
+        validateRaceManagementPermission(race, currentUser);
         validateStatusTransition(race.getStatus(), request.status());
+        validateMinimumApprovedParticipants(race, request.status());
 
         if (race.getStatus() == RaceStatus.IN_PROGRESS
                 && request.status() == RaceStatus.COMPLETED
@@ -129,8 +146,6 @@ public class RaceService {
         Race savedRace = raceRepository.save(race);
 
         if (request.status() == RaceStatus.CANCELLED) {
-            User currentUser = currentUserService.getOrSynchronizeCurrentUser();
-
             auditLogService.log(
                     currentUser,
                     AuditLogService.ACTION_RACE_CANCELLED,
@@ -147,6 +162,9 @@ public class RaceService {
     @Transactional
     public void cancelRace(UUID id) {
         Race race = findRaceById(id);
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+        validateRaceManagementPermission(race, currentUser);
 
         if (race.getStatus() == RaceStatus.CANCELLED) {
             return;
@@ -167,8 +185,6 @@ public class RaceService {
 
         raceRepository.save(race);
 
-        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
-
         auditLogService.log(
                 currentUser,
                 AuditLogService.ACTION_RACE_CANCELLED,
@@ -177,6 +193,50 @@ public class RaceService {
                 "Race cancelled",
                 "status=" + previousStatus,
                 "status=" + RaceStatus.CANCELLED);
+    }
+
+    private void validateMinimumApprovedParticipants(
+            Race race,
+            RaceStatus requestedStatus) {
+        boolean requiresApprovedParticipants = (race.getStatus() == RaceStatus.OPEN_FOR_REGISTRATION
+                && requestedStatus == RaceStatus.CLOSED_FOR_REGISTRATION)
+                || (race.getStatus() == RaceStatus.CLOSED_FOR_REGISTRATION
+                        && requestedStatus == RaceStatus.IN_PROGRESS);
+
+        if (!requiresApprovedParticipants) {
+            return;
+        }
+
+        long approvedParticipantCount = registrationRepository.countByRaceIdAndStatusIn(
+                race.getId(),
+                APPROVED_REGISTRATION_STATUSES);
+
+        if (approvedParticipantCount < MINIMUM_APPROVED_PARTICIPANTS) {
+            throw new ConflictException(
+                    "A race needs at least two approved participants before it can be closed or started");
+        }
+    }
+
+    private void validateRaceManagementPermission(Race race, User currentUser) {
+        if (hasAdministratorRole()) {
+            return;
+        }
+
+        if (!race.getOrganizer().getId().equals(currentUser.getId())) {
+            throw new AccessDeniedException(
+                    "Race organizer can only manage own races");
+        }
+    }
+
+    private boolean hasAdministratorRole() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        if (authentication == null) {
+            return false;
+        }
+
+        return authentication.getAuthorities().contains(
+                new SimpleGrantedAuthority("ROLE_ADMINISTRATOR"));
     }
 
     private Race findRaceById(UUID id) {

@@ -18,17 +18,6 @@ public interface RaceResultRepository extends JpaRepository<RaceResult, UUID> {
 
         boolean existsByRegistrationId(UUID registrationId);
 
-        boolean existsByRegistration_Race_IdAndFinalPositionAndStatus(
-                        UUID raceId,
-                        Integer finalPosition,
-                        ResultStatus status);
-
-        boolean existsByRegistration_Race_IdAndFinalPositionAndStatusAndIdNot(
-                        UUID raceId,
-                        Integer finalPosition,
-                        ResultStatus status,
-                        UUID id);
-
         @EntityGraph(attributePaths = {
                         "registration",
                         "registration.race",
@@ -47,6 +36,23 @@ public interface RaceResultRepository extends JpaRepository<RaceResult, UUID> {
                                 result.recordedAt asc
                         """)
         List<RaceResult> findDetailedByRaceId(
+                        @Param("raceId") UUID raceId,
+                        @Param("finishedStatus") ResultStatus finishedStatus);
+
+        @EntityGraph(attributePaths = {
+                        "registration",
+                        "registration.race",
+                        "registration.competitor",
+                        "registration.team",
+                        "recordedBy"
+        })
+        @Query("""
+                        select result
+                        from RaceResult result
+                        where result.registration.race.id = :raceId
+                                and result.status = :finishedStatus
+                        """)
+        List<RaceResult> findDetailedFinishedByRaceId(
                         @Param("raceId") UUID raceId,
                         @Param("finishedStatus") ResultStatus finishedStatus);
 

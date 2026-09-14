@@ -3,30 +3,38 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { AuthContext } from './AuthContext'
 import { RoleGuard } from './RoleGuard'
+import type { AppRole } from './authTypes'
 
-function renderRoleGuard(hasRole: boolean) {
+function renderRoleGuard(
+    initialized: boolean,
+    authenticated: boolean,
+    roles: AppRole[],
+    allowedRoles: AppRole[],
+) {
     return render(
         <AuthContext.Provider
             value={{
-                initialized: true,
-                authenticated: true,
-                user: {
-                    username: 'admin',
-                    displayName: 'Admin User',
-                    roles: hasRole ? ['ADMIN'] : ['USER'],
-                },
+                initialized,
+                authenticated,
+                user: authenticated
+                    ? {
+                        username: 'race-user',
+                        displayName: 'Race User',
+                        roles,
+                    }
+                    : null,
                 login: async () => undefined,
                 logout: async () => undefined,
-                hasRole: (role) => hasRole && role === 'ADMIN',
+                hasRole: (role) => roles.includes(role as AppRole),
             }}
         >
-            <MemoryRouter initialEntries={['/admin']}>
+            <MemoryRouter initialEntries={['/restricted']}>
                 <Routes>
                     <Route
-                        path="/admin"
+                        path="/restricted"
                         element={
-                            <RoleGuard role="ADMIN">
-                                <p>Administrative content</p>
+                            <RoleGuard allowedRoles={allowedRoles}>
+                                <p>Restricted content</p>
                             </RoleGuard>
                         }
                     />
@@ -39,15 +47,64 @@ function renderRoleGuard(hasRole: boolean) {
 }
 
 describe('RoleGuard', () => {
-    it('renders protected content when the user has the required role', () => {
-        renderRoleGuard(true)
+    it('shows preparing access while the session is initializing', () => {
+        renderRoleGuard(
+            false,
+            false,
+            [],
+            ['ADMINISTRATOR'],
+        )
 
-        expect(screen.getByText('Administrative content')).toBeInTheDocument()
+        expect(
+            screen.getByRole('heading', {
+                name: 'Preparing access',
+            }),
+        ).toBeInTheDocument()
+        expect(screen.queryByText('Login')).not.toBeInTheDocument()
+        expect(screen.queryByText('Access denied')).not.toBeInTheDocument()
     })
 
-    it('redirects to forbidden when the user lacks the required role', () => {
-        renderRoleGuard(false)
+    it('renders protected content for an administrator', () => {
+        renderRoleGuard(
+            true,
+            true,
+            ['ADMINISTRATOR'],
+            ['ADMINISTRATOR', 'RACE_ORGANIZER'],
+        )
+
+        expect(screen.getByText('Restricted content')).toBeInTheDocument()
+    })
+
+    it('renders protected content for a race organizer', () => {
+        renderRoleGuard(
+            true,
+            true,
+            ['RACE_ORGANIZER'],
+            ['ADMINISTRATOR', 'RACE_ORGANIZER'],
+        )
+
+        expect(screen.getByText('Restricted content')).toBeInTheDocument()
+    })
+
+    it('redirects a viewer to forbidden for a restricted route', () => {
+        renderRoleGuard(
+            true,
+            true,
+            ['VIEWER'],
+            ['ADMINISTRATOR', 'RACE_ORGANIZER'],
+        )
 
         expect(screen.getByText('Access denied')).toBeInTheDocument()
+    })
+
+    it('redirects an unauthenticated user to login', () => {
+        renderRoleGuard(
+            true,
+            false,
+            [],
+            ['ADMINISTRATOR'],
+        )
+
+        expect(screen.getByText('Login')).toBeInTheDocument()
     })
 })

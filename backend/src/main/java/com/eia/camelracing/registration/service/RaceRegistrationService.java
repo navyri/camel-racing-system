@@ -17,6 +17,7 @@ import com.eia.camelracing.race.entity.RaceType;
 import com.eia.camelracing.race.repository.RaceRepository;
 import com.eia.camelracing.registration.dto.RaceRegistrationRequest;
 import com.eia.camelracing.registration.dto.RaceRegistrationResponse;
+import com.eia.camelracing.registration.dto.RegistrationApprovalRequest;
 import com.eia.camelracing.registration.dto.RegistrationRejectRequest;
 import com.eia.camelracing.registration.entity.RaceRegistration;
 import com.eia.camelracing.registration.entity.RegistrationStatus;
@@ -41,7 +42,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class RaceRegistrationService {
 
-    private static final List<RegistrationStatus> CAPACITY_CONSUMING_STATUSES = List.of(
+    private static final List<RegistrationStatus> APPROVED_REGISTRATION_STATUSES = List.of(
+            RegistrationStatus.APPROVED);
+
+    private static final List<RegistrationStatus> PARTICIPATING_REGISTRATION_STATUSES = List.of(
             RegistrationStatus.PENDING,
             RegistrationStatus.APPROVED);
 
@@ -63,16 +67,13 @@ public class RaceRegistrationService {
         User currentUser = currentUserService.getOrSynchronizeCurrentUser();
         validateOrganizerPermission(race, currentUser);
 
-        validateCapacity(race);
-        validateStartingPosition(raceId, request.startingPosition());
-
         validateParticipantType(race.getRaceType(), request);
 
         RaceRegistration registration = RaceRegistration.builder()
                 .race(race)
                 .registeredAt(LocalDateTime.now())
                 .status(RegistrationStatus.PENDING)
-                .startingPosition(request.startingPosition())
+                .startingPosition(null)
                 .registeredBy(currentUser)
                 .build();
 
@@ -82,7 +83,7 @@ public class RaceRegistrationService {
             registration.setCompetitor(competitor);
         } else {
             Team team = findTeamById(request.teamId());
-            validateTeamRegistration(race, team);
+            validateTeamRegistration(race, team, true);
             registration.setTeam(team);
         }
 
@@ -105,7 +106,9 @@ public class RaceRegistrationService {
     }
 
     @Transactional
-    public RaceRegistrationResponse approveRegistration(UUID id) {
+    public RaceRegistrationResponse approveRegistration(
+            UUID id,
+            RegistrationApprovalRequest request) {
         RaceRegistration registration = findDetailedRegistrationById(id);
         User currentUser = currentUserService.getOrSynchronizeCurrentUser();
 
@@ -115,7 +118,19 @@ public class RaceRegistrationService {
             throw new ConflictException("Only pending registrations can be approved");
         }
 
+        Race race = registration.getRace();
+
+        if (registration.getTeam() != null) {
+            validateTeamRegistration(race, registration.getTeam(), false);
+        } else if (registration.getCompetitor() != null) {
+            validateIndividualRegistrationForApproval(race, registration.getCompetitor());
+        }
+
+        validateCapacity(race);
+        validateStartingPosition(race, request.startingPosition());
+
         RegistrationStatus previousStatus = registration.getStatus();
+        registration.setStartingPosition(request.startingPosition());
         registration.setStatus(RegistrationStatus.APPROVED);
 
         RaceRegistration savedRegistration = registrationRepository.save(registration);
@@ -208,23 +223,24 @@ public class RaceRegistrationService {
     private void validateCapacity(Race race) {
         long occupiedCapacity = registrationRepository.countByRaceIdAndStatusIn(
                 race.getId(),
-                CAPACITY_CONSUMING_STATUSES);
+                APPROVED_REGISTRATION_STATUSES);
 
         if (occupiedCapacity >= race.getMaxParticipants()) {
             throw new ConflictException("Race capacity has been reached");
         }
     }
 
-    private void validateStartingPosition(UUID raceId, Integer startingPosition) {
-        if (startingPosition == null) {
-            return;
+    private void validateStartingPosition(Race race, Integer startingPosition) {
+        if (startingPosition > race.getMaxParticipants()) {
+            throw new ConflictException(
+                    "Starting position must be between 1 and " + race.getMaxParticipants());
         }
 
         boolean alreadyAssigned = registrationRepository
                 .existsByRaceIdAndStartingPositionAndStatusIn(
-                        raceId,
+                        race.getId(),
                         startingPosition,
-                        CAPACITY_CONSUMING_STATUSES);
+                        APPROVED_REGISTRATION_STATUSES);
 
         if (alreadyAssigned) {
             throw new ConflictException("Starting position is already assigned");
@@ -244,23 +260,60 @@ public class RaceRegistrationService {
     }
 
     private void validateIndividualRegistration(Race race, Competitor competitor) {
-        if (competitor.getStatus() != CompetitorStatus.ACTIVE) {
-            throw new ConflictException("Only active competitors can be registered");
-        }
+        validateActiveCompetitor(competitor);
 
         if (registrationRepository.existsByRaceIdAndCompetitorId(race.getId(), competitor.getId())) {
             throw new ConflictException("Competitor is already registered in this race");
         }
 
+        validateCompetitorNotParticipatingThroughTeam(race, competitor);
+    }
+
+    private void validateIndividualRegistrationForApproval(
+            Race race,
+            Competitor competitor) {
+        validateActiveCompetitor(competitor);
+        validateCompetitorNotParticipatingThroughTeam(race, competitor);
+    }
+
+    private void validateActiveCompetitor(Competitor competitor) {
+        if (competitor.getStatus() != CompetitorStatus.ACTIVE) {
+            throw new ConflictException("Only active competitors can be registered");
+        }
+    }
+
+    private void validateCompetitorNotParticipatingThroughTeam(
+            Race race,
+            Competitor competitor) {
         if (registrationRepository.existsActiveTeamRegistrationForCompetitor(
                 race.getId(),
                 competitor.getId(),
-                CAPACITY_CONSUMING_STATUSES)) {
+                PARTICIPATING_REGISTRATION_STATUSES)) {
             throw new ConflictException("Competitor is already participating through a registered team");
         }
     }
 
-    private void validateTeamRegistration(Race race, Team team) {
+    private void validateTeamRegistration(
+            Race race,
+            Team team,
+            boolean validateDuplicateTeamRegistration) {
+        validateEligibleTeam(team);
+
+        if (registrationRepository.existsIndividualRegistrationForActiveTeamMember(
+                race.getId(),
+                team,
+                PARTICIPATING_REGISTRATION_STATUSES)) {
+            throw new ConflictException(
+                    "An active team member is already registered individually in this race");
+        }
+
+        if (validateDuplicateTeamRegistration
+                && registrationRepository.existsByRaceIdAndTeamId(race.getId(), team.getId())) {
+            throw new ConflictException("Team is already registered in this race");
+        }
+    }
+
+    private void validateEligibleTeam(Team team) {
         if (team.getStatus() != TeamStatus.ACTIVE) {
             throw new ConflictException("Only active teams can be registered");
         }
@@ -278,10 +331,6 @@ public class RaceRegistrationService {
 
         if (nonActiveCompetitorCount > 0) {
             throw new ConflictException("All active team members must be active competitors");
-        }
-
-        if (registrationRepository.existsByRaceIdAndTeamId(race.getId(), team.getId())) {
-            throw new ConflictException("Team is already registered in this race");
         }
     }
 

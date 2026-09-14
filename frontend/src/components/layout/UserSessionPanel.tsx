@@ -1,4 +1,5 @@
 import { useContext } from 'react'
+
 import { AuthContext } from '../../auth/AuthContext'
 
 export function UserSessionPanel() {
@@ -10,8 +11,14 @@ export function UserSessionPanel() {
 
     return (
         <div className="user-session">
-            <span>{auth.user.displayName}</span>
-            <button type="button" onClick={() => void auth.logout()}>
+            <span>
+                {auth.user.displayName}
+            </span>
+
+            <button
+                type="button"
+                onClick={auth.logout}
+            >
                 Sign out
             </button>
         </div>

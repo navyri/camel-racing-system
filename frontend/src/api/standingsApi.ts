@@ -1,16 +1,25 @@
 import { apiClient } from './apiClient'
 
-export interface Standing {
-    camelId: string
-    camelName: string
-    races: number
-    wins: number
+export interface CompetitorStanding {
+    competitorId: string
+    name: string
+    nickname: string
     points: number
 }
 
-export function getStandings(): Promise<Standing[]> {
-    return apiClient<Standing[]>('/api/standings', {
+export interface TeamStanding {
+    teamId: string
+    name: string
+    points: number
+}
+
+export interface StandingsResponse {
+    competitors: CompetitorStanding[]
+    teams: TeamStanding[]
+}
+
+export function getStandings(): Promise<StandingsResponse> {
+    return apiClient<StandingsResponse>('/api/standings', {
         method: 'GET',
-        requiresAuth: false,
     })
 }

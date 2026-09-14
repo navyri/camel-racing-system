@@ -3,6 +3,7 @@ package com.eia.camelracing.common.service;
 import java.time.LocalDateTime;
 
 import com.eia.camelracing.audit.service.AuditLogService;
+import com.eia.camelracing.common.exception.ConflictException;
 import com.eia.camelracing.user.entity.User;
 import com.eia.camelracing.user.repository.UserRepository;
 
@@ -32,8 +33,8 @@ public class CurrentUserService {
         String lastName = getLastName(jwt);
 
         return userRepository.findByKeycloakSubject(keycloakSubject)
-                .map(user -> updateUser(user, username, email, firstName, lastName))
-                .orElseGet(() -> createUser(
+                .map(user -> updateUser(user, keycloakSubject, username, email, firstName, lastName))
+                .orElseGet(() -> findOrCreateUser(
                         keycloakSubject,
                         username,
                         email,
@@ -121,6 +122,59 @@ public class CurrentUserService {
         return "Keycloak";
     }
 
+    private User findOrCreateUser(
+            String keycloakSubject,
+            String username,
+            String email,
+            String firstName,
+            String lastName) {
+        return userRepository.findByEmail(email)
+                .map(user -> migrateLegacyUser(
+                        user,
+                        keycloakSubject,
+                        username,
+                        email,
+                        firstName,
+                        lastName))
+                .orElseGet(() -> createUser(
+                        keycloakSubject,
+                        username,
+                        email,
+                        firstName,
+                        lastName));
+    }
+
+    private User migrateLegacyUser(
+            User user,
+            String keycloakSubject,
+            String username,
+            String email,
+            String firstName,
+            String lastName) {
+        if (!isLegacySubjectForUsername(user.getKeycloakSubject(), username)) {
+            throw new ConflictException(
+                    "Local user identity conflicts with the authenticated user");
+        }
+
+        return updateUser(user, keycloakSubject, username, email, firstName, lastName);
+    }
+
+    private boolean isLegacySubjectForUsername(
+            String storedKeycloakSubject,
+            String username) {
+        if (!hasText(storedKeycloakSubject) || !hasText(username)) {
+            return false;
+        }
+
+        int separatorIndex = storedKeycloakSubject.lastIndexOf("|");
+
+        if (separatorIndex <= 0 || separatorIndex == storedKeycloakSubject.length() - 1) {
+            return false;
+        }
+
+        return storedKeycloakSubject.substring(separatorIndex + 1).equals(username);
+    }
+
     private User createUser(
             String keycloakSubject,
             String username,
@@ -154,10 +208,12 @@ public class CurrentUserService {
 
     private User updateUser(
             User user,
+            String keycloakSubject,
             String username,
             String email,
             String firstName,
             String lastName) {
+        user.setKeycloakSubject(keycloakSubject);
         user.setUsername(username);
         user.setEmail(email);
         user.setFirstName(firstName);

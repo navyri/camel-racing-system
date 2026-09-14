@@ -3,10 +3,11 @@ import {
     useCallback,
     useEffect,
     useMemo,
+    useRef,
     useState,
 } from 'react'
-import { getAppRoles, type AuthState, type AuthUser } from './authTypes'
 import { AuthContext, type AuthContextValue } from './AuthContext'
+import { getAppRoles, type AuthState, type AuthUser } from './authTypes'
 import { keycloak } from './keycloak'
 
 function getUser(): AuthUser | null {
@@ -17,7 +18,8 @@ function getUser(): AuthUser | null {
     }
 
     const roles = getAppRoles(token.realm_access?.roles)
-    const username = token.preferred_username ?? token.sub ?? 'user'
+    const username =
+        token.preferred_username ?? token.sub ?? 'unknown-account'
     const displayName = token.name ?? username
     const email = token.email
 
@@ -33,12 +35,17 @@ interface AuthProviderProps {
     children: ReactNode
 }
 
+function getCurrentRedirectUri(): string {
+    return window.location.href
+}
+
 export function AuthProvider({ children }: AuthProviderProps) {
     const [authState, setAuthState] = useState<AuthState>({
         initialized: false,
         authenticated: false,
         user: null,
     })
+    const didInit = useRef(false)
 
     const refreshAuthState = useCallback(() => {
         const user = getUser()
@@ -51,27 +58,28 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }, [])
 
     useEffect(() => {
-        let mounted = true
+        if (didInit.current) {
+            return
+        }
+        didInit.current = true
 
         void keycloak
             .init({
                 onLoad: 'check-sso',
                 pkceMethod: 'S256',
                 checkLoginIframe: false,
+                redirectUri: getCurrentRedirectUri(),
+                silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
             })
             .then(() => {
-                if (mounted) {
-                    refreshAuthState()
-                }
+                refreshAuthState()
             })
             .catch(() => {
-                if (mounted) {
-                    setAuthState({
-                        initialized: true,
-                        authenticated: false,
-                        user: null,
-                    })
-                }
+                setAuthState({
+                    initialized: true,
+                    authenticated: false,
+                    user: null,
+                })
             })
 
         keycloak.onAuthSuccess = refreshAuthState
@@ -80,35 +88,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
         keycloak.onTokenExpired = () => {
             void keycloak.updateToken(30).catch(() => {
                 keycloak.clearToken()
-
-                if (mounted) {
-                    setAuthState({
-                        initialized: true,
-                        authenticated: false,
-                        user: null,
-                    })
-                }
+                setAuthState({
+                    initialized: true,
+                    authenticated: false,
+                    user: null,
+                })
             })
-        }
-
-        return () => {
-            mounted = false
-            keycloak.onAuthSuccess = undefined
-            keycloak.onAuthRefreshSuccess = undefined
-            keycloak.onAuthLogout = undefined
-            keycloak.onTokenExpired = undefined
         }
     }, [refreshAuthState])
 
     const login = useCallback(async () => {
         await keycloak.login({
-            redirectUri: window.location.origin,
+            redirectUri: getCurrentRedirectUri(),
         })
     }, [])
 
     const logout = useCallback(async () => {
         await keycloak.logout({
-            redirectUri: window.location.origin,
+            redirectUri: getCurrentRedirectUri(),
         })
     }, [])
 
@@ -117,7 +114,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
             ...authState,
             login,
             logout,
-            hasRole: (role) => authState.user?.roles.includes(role as never) ?? false,
+            hasRole: (role) =>
+                authState.user?.roles.includes(role as never) ?? false,
         }),
         [authState, login, logout],
     )
