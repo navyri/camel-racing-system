@@ -24,6 +24,8 @@
   ·
   <a href="#usuarios-de-demostracion">Usuarios demo</a>
   ·
+  <a href="#datos-demo-y-seed">Seed demo</a>
+  ·
   <a href="#swagger-y-autorizacion">Swagger</a>
 </p>
 
@@ -89,12 +91,58 @@ Estas cuentas existen exclusivamente para desarrollo academico y demostracion lo
 
 Estas contrasenas no son credenciales personales y no deben reutilizarse fuera de este proyecto.
 
+## Datos demo y seed
+
+El archivo `../seed-dark-fantasy-demo.sql` carga el conjunto de datos de demostracion en PostgreSQL.
+
+El seed crea los roles y las representaciones locales de los tres usuarios demo requeridos por las claves foraneas de carreras, inscripciones y resultados. Los valores de `keycloak_subject` del seed deben coincidir con los IDs reales de los usuarios del realm de Keycloak.
+
+Los IDs configurados actualmente son:
+
+| Usuario | Keycloak subject |
+|---|---|
+| `admin` | `69ef73d0-bb6f-40e7-9f5a-518fd43385d8` |
+| `organizer` | `a0aee218-9ed9-4872-91a7-2d7e528ae74c` |
+| `viewer` | `15a4ccfb-6543-48c6-be83-9fa40c2c7b50` |
+
+Ejecuta el seed solo contra una base de datos completamente limpia, incluidas las tablas `users`, `roles`, `user_roles` y las tablas de negocio.
+
+Desde la raiz del repositorio:
+
+```powershell
+Get-Content .\seed-dark-fantasy-demo.sql |
+    docker exec -i camel-racing-db psql -v ON_ERROR_STOP=1 -U camel_racing_user -d camel_racing_db
+```
+
+El comando no debe modificarse. Si necesitas recargar todo el entorno demo desde cero, elimina el volumen y levanta nuevamente los servicios antes de ejecutar el seed:
+
+```powershell
+docker compose down -v
+docker compose up -d
+```
+
+El seed carga como minimo:
+
+- Un administrator, un race organizer y un viewer
+- Cinco `DWARF`, dos `CAMEL` y dos `MEDIUM`
+- Tres equipos
+- Siete carreras en estados `DRAFT`, `OPEN_FOR_REGISTRATION`, `IN_PROGRESS` y `COMPLETED`
+- Dos carreras completadas con resultados
+
+El seed no genera Audit Log porque inserta datos directamente en PostgreSQL. Los eventos de auditoria se generan al realizar operaciones por la interfaz o API.
+
 ## Consola administrativa
 
 Despues de iniciar Docker Compose, Keycloak queda disponible en:
 
 ```text
 http://localhost:8180
+```
+
+La consola administrativa se encuentra en:
+
+```text
+http://localhost:8180/admin
 ```
 
 La consola administrativa usa las variables:
@@ -116,11 +164,11 @@ http://localhost:8080/swagger-ui/index.html
 
 Para autorizar solicitudes desde Swagger:
 
-1. Inicia PostgreSQL, Keycloak y backend mediante Docker Compose.
-2. Abre Swagger UI.
-3. Presiona el boton `Authorize`.
-4. Inicia sesion con uno de los usuarios de demostracion.
-5. Ejecuta los endpoints permitidos por el rol autenticado.
+1. Inicia PostgreSQL, Keycloak y backend mediante Docker Compose
+2. Abre Swagger UI
+3. Presiona el boton `Authorize`
+4. Inicia sesion con uno de los usuarios de demostracion
+5. Ejecuta los endpoints permitidos por el rol autenticado
 
 El cliente de Swagger usa OAuth 2.0 Authorization Code Flow con PKCE. No se almacena un client secret en el navegador.
 

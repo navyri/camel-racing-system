@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -39,9 +38,9 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 @DisplayName("Current user service")
 class CurrentUserServiceTest {
 
-        private static final String FALLBACK_ISSUER = "http://localhost:8180/realms/camel-racing";
+        private static final String ISSUER = "http://localhost:8180/realms/camel-racing";
         private static final String FALLBACK_USERNAME = "organizer";
-        private static final String FALLBACK_KEYCLOAK_SUBJECT = FALLBACK_ISSUER + "|" + FALLBACK_USERNAME;
+        private static final String FALLBACK_KEYCLOAK_SUBJECT = ISSUER + "|" + FALLBACK_USERNAME;
 
         @Mock
         private UserRepository userRepository;
@@ -58,9 +57,9 @@ class CurrentUserServiceTest {
         }
 
         @Test
-        @DisplayName("creates local user from authenticated JWT claims")
-        void createsLocalUserFromAuthenticatedJwtClaims() {
-                JwtAuthenticationToken authentication = authentication(
+        @DisplayName("creates local user from authenticated JWT claims with subject")
+        void createsLocalUserFromAuthenticatedJwtClaimsWithSubject() {
+                JwtAuthenticationToken authentication = authenticationWithSubject(
                                 "keycloak-subject",
                                 "organizer",
                                 "organizer@camel-racing.test",
@@ -72,6 +71,8 @@ class CurrentUserServiceTest {
                 when(userRepository.findByKeycloakSubject("keycloak-subject"))
                                 .thenReturn(Optional.empty());
                 when(userRepository.findByEmail("organizer@camel-racing.test"))
+                                .thenReturn(Optional.empty());
+                when(userRepository.findByUsername("organizer"))
                                 .thenReturn(Optional.empty());
                 when(userRepository.save(any(User.class)))
                                 .thenAnswer(invocation -> {
@@ -106,9 +107,9 @@ class CurrentUserServiceTest {
         }
 
         @Test
-        @DisplayName("updates existing local user from authenticated JWT claims")
-        void updatesExistingLocalUserFromAuthenticatedJwtClaims() {
-                JwtAuthenticationToken authentication = authentication(
+        @DisplayName("updates existing local user from authenticated JWT claims with subject")
+        void updatesExistingLocalUserFromAuthenticatedJwtClaimsWithSubject() {
+                JwtAuthenticationToken authentication = authenticationWithSubject(
                                 "keycloak-subject",
                                 "updated-organizer",
                                 "updated@camel-racing.test",
@@ -117,14 +118,14 @@ class CurrentUserServiceTest {
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
 
-                User existingUser = User.builder()
-                                .keycloakSubject("keycloak-subject")
-                                .username("old-organizer")
-                                .email("old@camel-racing.test")
-                                .firstName("Old")
-                                .lastName("Name")
-                                .enabled(false)
-                                .build();
+                User existingUser = user(
+                                "keycloak-subject",
+                                "old-organizer",
+                                "old@camel-racing.test",
+                                "Old",
+                                "Name");
+
+                existingUser.setEnabled(false);
 
                 when(userRepository.findByKeycloakSubject("keycloak-subject"))
                                 .thenReturn(Optional.of(existingUser));
@@ -141,20 +142,14 @@ class CurrentUserServiceTest {
 
                 verify(userRepository).save(existingUser);
                 verify(userRepository, never()).findByEmail(any(String.class));
-                verify(auditLogService, never()).log(
-                                any(User.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class));
+                verify(userRepository, never()).findByUsername(any(String.class));
+                verifyNoAuditLog();
         }
 
         @Test
-        @DisplayName("migrates a legacy local user with matching email and username")
-        void migratesLegacyLocalUserWithMatchingEmailAndUsername() {
-                JwtAuthenticationToken authentication = authentication(
+        @DisplayName("migrates legacy local user with subject when email matches")
+        void migratesLegacyLocalUserWithSubjectWhenEmailMatches() {
+                JwtAuthenticationToken authentication = authenticationWithSubject(
                                 "current-keycloak-subject",
                                 "admin",
                                 "admin@camel-racing.test",
@@ -163,16 +158,12 @@ class CurrentUserServiceTest {
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
 
-                User legacyUser = User.builder()
-                                .id(UUID.randomUUID())
-                                .keycloakSubject(
-                                                "http://localhost:8180/realms/camel-racing|admin")
-                                .username("admin")
-                                .email("admin@camel-racing.test")
-                                .firstName("Legacy")
-                                .lastName("Administrator")
-                                .enabled(true)
-                                .build();
+                User legacyUser = user(
+                                ISSUER + "|admin",
+                                "admin",
+                                "admin@camel-racing.test",
+                                "Legacy",
+                                "Administrator");
 
                 when(userRepository.findByKeycloakSubject("current-keycloak-subject"))
                                 .thenReturn(Optional.empty());
@@ -190,39 +181,104 @@ class CurrentUserServiceTest {
                 assertThat(user.getLastName()).isEqualTo("Administrator");
 
                 verify(userRepository).save(legacyUser);
-                verify(auditLogService, never()).log(
-                                any(User.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class));
+                verify(userRepository, never()).findByUsername(any(String.class));
+                verifyNoAuditLog();
         }
 
         @Test
-        @DisplayName("rejects email matches that are not compatible with a legacy identity")
-        void rejectsEmailMatchesThatAreNotCompatibleWithALegacyIdentity() {
-                JwtAuthenticationToken authentication = authentication(
-                                "current-keycloak-subject",
+        @DisplayName("reuses local user without subject when email and username match")
+        void reusesLocalUserWithoutSubjectWhenEmailAndUsernameMatch() {
+                JwtAuthenticationToken authentication = authenticationWithoutSubject(
                                 "admin",
                                 "admin@camel-racing.test",
-                                "System",
+                                "Academic",
                                 "Administrator");
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
 
-                User existingUser = User.builder()
-                                .keycloakSubject("another-keycloak-subject")
-                                .username("admin")
-                                .email("admin@camel-racing.test")
-                                .firstName("Another")
-                                .lastName("User")
-                                .enabled(true)
-                                .build();
+                User existingUser = user(
+                                "69ef73d0-bb6f-40e7-9f5a-518fd43385d8",
+                                "admin",
+                                "admin@camel-racing.test",
+                                "Demo",
+                                "Administrator");
 
-                when(userRepository.findByKeycloakSubject("current-keycloak-subject"))
-                                .thenReturn(Optional.empty());
+                when(userRepository.findByEmail("admin@camel-racing.test"))
+                                .thenReturn(Optional.of(existingUser));
+                when(userRepository.save(existingUser)).thenReturn(existingUser);
+
+                User user = currentUserService.getOrSynchronizeCurrentUser();
+
+                assertThat(user).isSameAs(existingUser);
+                assertThat(user.getKeycloakSubject())
+                                .isEqualTo("69ef73d0-bb6f-40e7-9f5a-518fd43385d8");
+                assertThat(user.getUsername()).isEqualTo("admin");
+                assertThat(user.getEmail()).isEqualTo("admin@camel-racing.test");
+                assertThat(user.getFirstName()).isEqualTo("Academic");
+                assertThat(user.getLastName()).isEqualTo("Administrator");
+                assertThat(user.isEnabled()).isTrue();
+
+                verify(userRepository).save(existingUser);
+                verify(userRepository, never()).findByKeycloakSubject(any(String.class));
+                verify(userRepository, never()).findByUsername(any(String.class));
+                verifyNoAuditLog();
+        }
+
+        @Test
+        @DisplayName("reuses local user without subject and without email when username matches")
+        void reusesLocalUserWithoutSubjectAndWithoutEmailWhenUsernameMatches() {
+                JwtAuthenticationToken authentication = authenticationWithoutSubjectAndEmail(
+                                "organizer",
+                                "Race",
+                                "Organizer");
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                User existingUser = user(
+                                "legacy-organizer-subject",
+                                "organizer",
+                                "organizer@camel-racing.test",
+                                "Legacy",
+                                "Organizer");
+
+                when(userRepository.findByUsername("organizer"))
+                                .thenReturn(Optional.of(existingUser));
+                when(userRepository.save(existingUser)).thenReturn(existingUser);
+
+                User user = currentUserService.getOrSynchronizeCurrentUser();
+
+                assertThat(user).isSameAs(existingUser);
+                assertThat(user.getKeycloakSubject()).isEqualTo("legacy-organizer-subject");
+                assertThat(user.getUsername()).isEqualTo("organizer");
+                assertThat(user.getEmail()).isEqualTo("organizer@camel-racing.test");
+                assertThat(user.getFirstName()).isEqualTo("Race");
+                assertThat(user.getLastName()).isEqualTo("Organizer");
+                assertThat(user.isEnabled()).isTrue();
+
+                verify(userRepository).save(existingUser);
+                verify(userRepository, never()).findByEmail(any(String.class));
+                verify(userRepository, never()).findByKeycloakSubject(any(String.class));
+                verifyNoAuditLog();
+        }
+
+        @Test
+        @DisplayName("rejects local user without subject when email matches but username differs")
+        void rejectsLocalUserWithoutSubjectWhenEmailMatchesButUsernameDiffers() {
+                JwtAuthenticationToken authentication = authenticationWithoutSubject(
+                                "admin",
+                                "admin@camel-racing.test",
+                                "Academic",
+                                "Administrator");
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                User existingUser = user(
+                                "69ef73d0-bb6f-40e7-9f5a-518fd43385d8",
+                                "another-admin",
+                                "admin@camel-racing.test",
+                                "Demo",
+                                "Administrator");
+
                 when(userRepository.findByEmail("admin@camel-racing.test"))
                                 .thenReturn(Optional.of(existingUser));
 
@@ -231,19 +287,43 @@ class CurrentUserServiceTest {
                                 .hasMessage("Local user identity conflicts with the authenticated user");
 
                 verify(userRepository, never()).save(any(User.class));
-                verify(auditLogService, never()).log(
-                                any(User.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class));
+                verifyNoAuditLog();
         }
 
         @Test
-        @DisplayName("reuses local user when JWT has no subject")
-        void reusesLocalUserWhenJwtHasNoSubject() {
+        @DisplayName("rejects local user without subject when username matches but JWT email differs")
+        void rejectsLocalUserWithoutSubjectWhenUsernameMatchesButJwtEmailDiffers() {
+                JwtAuthenticationToken authentication = authenticationWithoutSubject(
+                                "admin",
+                                "admin@keycloak.local",
+                                "Academic",
+                                "Administrator");
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                User existingUser = user(
+                                "69ef73d0-bb6f-40e7-9f5a-518fd43385d8",
+                                "admin",
+                                "admin@camel-racing.test",
+                                "Demo",
+                                "Administrator");
+
+                when(userRepository.findByEmail("admin@keycloak.local"))
+                                .thenReturn(Optional.empty());
+                when(userRepository.findByUsername("admin"))
+                                .thenReturn(Optional.of(existingUser));
+
+                assertThatThrownBy(() -> currentUserService.getOrSynchronizeCurrentUser())
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("Local user identity conflicts with the authenticated user");
+
+                verify(userRepository, never()).save(any(User.class));
+                verifyNoAuditLog();
+        }
+
+        @Test
+        @DisplayName("creates user without subject when no local identity exists")
+        void createsUserWithoutSubjectWhenNoLocalIdentityExists() {
                 JwtAuthenticationToken authentication = authenticationWithoutSubject(
                                 FALLBACK_USERNAME,
                                 "organizer@camel-racing.test",
@@ -252,68 +332,75 @@ class CurrentUserServiceTest {
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
 
-                User createdUser = User.builder()
-                                .id(UUID.randomUUID())
-                                .keycloakSubject(FALLBACK_KEYCLOAK_SUBJECT)
-                                .username(FALLBACK_USERNAME)
-                                .email("organizer@camel-racing.test")
-                                .firstName("Race")
-                                .lastName("Organizer")
-                                .enabled(true)
-                                .build();
-
-                when(userRepository.findByKeycloakSubject(FALLBACK_KEYCLOAK_SUBJECT))
-                                .thenReturn(Optional.empty(), Optional.of(createdUser));
                 when(userRepository.findByEmail("organizer@camel-racing.test"))
+                                .thenReturn(Optional.empty());
+                when(userRepository.findByUsername(FALLBACK_USERNAME))
                                 .thenReturn(Optional.empty());
                 when(userRepository.save(any(User.class)))
                                 .thenAnswer(invocation -> {
                                         User savedUser = invocation.getArgument(0);
-
-                                        if (savedUser.getId() == null) {
-                                                savedUser.setId(UUID.randomUUID());
-                                        }
-
+                                        savedUser.setId(UUID.randomUUID());
                                         return savedUser;
                                 });
 
-                User firstUser = currentUserService.getOrSynchronizeCurrentUser();
-                User secondUser = currentUserService.getOrSynchronizeCurrentUser();
+                User user = currentUserService.getOrSynchronizeCurrentUser();
 
-                ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-                verify(userRepository, times(2))
-                                .findByKeycloakSubject(FALLBACK_KEYCLOAK_SUBJECT);
-                verify(userRepository).findByEmail("organizer@camel-racing.test");
-                verify(userRepository, times(2)).save(captor.capture());
-
-                List<User> savedUsers = captor.getAllValues();
-
-                assertThat(firstUser.getKeycloakSubject())
-                                .isEqualTo(FALLBACK_KEYCLOAK_SUBJECT);
-                assertThat(secondUser).isSameAs(createdUser);
-                assertThat(savedUsers).hasSize(2);
-                assertThat(savedUsers.getFirst().getKeycloakSubject())
-                                .isEqualTo(FALLBACK_KEYCLOAK_SUBJECT);
-                assertThat(savedUsers.getLast()).isSameAs(createdUser);
-                assertThat(savedUsers.getLast().getKeycloakSubject())
-                                .isEqualTo(FALLBACK_KEYCLOAK_SUBJECT);
+                assertThat(user.getKeycloakSubject()).isEqualTo(FALLBACK_KEYCLOAK_SUBJECT);
+                assertThat(user.getUsername()).isEqualTo(FALLBACK_USERNAME);
+                assertThat(user.getEmail()).isEqualTo("organizer@camel-racing.test");
+                assertThat(user.getFirstName()).isEqualTo("Race");
+                assertThat(user.getLastName()).isEqualTo("Organizer");
+                assertThat(user.isEnabled()).isTrue();
+                assertThat(user.getCreatedAt()).isNotNull();
 
                 verify(auditLogService).log(
-                                eq(firstUser),
+                                eq(user),
                                 eq(AuditLogService.ACTION_USER_CREATED),
                                 eq("USER"),
-                                eq(firstUser.getId().toString()),
+                                eq(user.getId().toString()),
                                 eq("Local user created from authenticated JWT"),
                                 eq(null),
                                 eq("username=organizer, email=organizer@camel-racing.test"));
-                verify(auditLogService, times(1)).log(
-                                any(User.class),
+        }
+
+        @Test
+        @DisplayName("creates user without subject and without email when no local identity exists")
+        void createsUserWithoutSubjectAndWithoutEmailWhenNoLocalIdentityExists() {
+                JwtAuthenticationToken authentication = authenticationWithoutSubjectAndEmail(
+                                FALLBACK_USERNAME,
+                                "Race",
+                                "Organizer");
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                when(userRepository.findByUsername(FALLBACK_USERNAME))
+                                .thenReturn(Optional.empty());
+                when(userRepository.save(any(User.class)))
+                                .thenAnswer(invocation -> {
+                                        User savedUser = invocation.getArgument(0);
+                                        savedUser.setId(UUID.randomUUID());
+                                        return savedUser;
+                                });
+
+                User user = currentUserService.getOrSynchronizeCurrentUser();
+
+                assertThat(user.getKeycloakSubject()).isEqualTo(FALLBACK_KEYCLOAK_SUBJECT);
+                assertThat(user.getUsername()).isEqualTo(FALLBACK_USERNAME);
+                assertThat(user.getEmail()).isEqualTo("organizer@keycloak.local");
+                assertThat(user.getFirstName()).isEqualTo("Race");
+                assertThat(user.getLastName()).isEqualTo("Organizer");
+                assertThat(user.isEnabled()).isTrue();
+                assertThat(user.getCreatedAt()).isNotNull();
+
+                verify(userRepository, never()).findByEmail(any(String.class));
+                verify(auditLogService).log(
+                                eq(user),
                                 eq(AuditLogService.ACTION_USER_CREATED),
                                 eq("USER"),
-                                any(String.class),
+                                eq(user.getId().toString()),
                                 eq("Local user created from authenticated JWT"),
                                 eq(null),
-                                any(String.class));
+                                eq("username=organizer, email=organizer@keycloak.local"));
         }
 
         @Test
@@ -326,6 +413,10 @@ class CurrentUserServiceTest {
                                 .isInstanceOf(IllegalStateException.class)
                                 .hasMessage("Authenticated JWT user is required");
 
+                verifyNoAuditLog();
+        }
+
+        private void verifyNoAuditLog() {
                 verify(auditLogService, never()).log(
                                 any(User.class),
                                 any(String.class),
@@ -336,7 +427,24 @@ class CurrentUserServiceTest {
                                 any(String.class));
         }
 
-        private JwtAuthenticationToken authentication(
+        private User user(
+                        String keycloakSubject,
+                        String username,
+                        String email,
+                        String firstName,
+                        String lastName) {
+                return User.builder()
+                                .id(UUID.randomUUID())
+                                .keycloakSubject(keycloakSubject)
+                                .username(username)
+                                .email(email)
+                                .firstName(firstName)
+                                .lastName(lastName)
+                                .enabled(true)
+                                .build();
+        }
+
+        private JwtAuthenticationToken authenticationWithSubject(
                         String subject,
                         String username,
                         String email,
@@ -344,7 +452,7 @@ class CurrentUserServiceTest {
                         String lastName) {
                 Jwt jwt = Jwt.withTokenValue("token")
                                 .header("alg", "RS256")
-                                .issuer(FALLBACK_ISSUER)
+                                .issuer(ISSUER)
                                 .subject(subject)
                                 .claim("preferred_username", username)
                                 .claim("email", email)
@@ -367,9 +475,29 @@ class CurrentUserServiceTest {
                         String lastName) {
                 Jwt jwt = Jwt.withTokenValue("token")
                                 .header("alg", "RS256")
-                                .issuer(FALLBACK_ISSUER)
+                                .issuer(ISSUER)
                                 .claim("preferred_username", username)
                                 .claim("email", email)
+                                .claim("given_name", firstName)
+                                .claim("family_name", lastName)
+                                .claim("realm_access", Map.of(
+                                                "roles",
+                                                List.of("RACE_ORGANIZER")))
+                                .issuedAt(Instant.now())
+                                .expiresAt(Instant.now().plusSeconds(300))
+                                .build();
+
+                return new JwtAuthenticationToken(jwt);
+        }
+
+        private JwtAuthenticationToken authenticationWithoutSubjectAndEmail(
+                        String username,
+                        String firstName,
+                        String lastName) {
+                Jwt jwt = Jwt.withTokenValue("token")
+                                .header("alg", "RS256")
+                                .issuer(ISSUER)
+                                .claim("preferred_username", username)
                                 .claim("given_name", firstName)
                                 .claim("family_name", lastName)
                                 .claim("realm_access", Map.of(

@@ -120,6 +120,31 @@ describe('RaceDetailPage', () => {
         expect(screen.getAllByText('01/08/2030, 10:00')).toHaveLength(2)
     })
 
+    it('hides edit and cancel actions for in-progress race state', async () => {
+        getRaceById.mockResolvedValueOnce(
+            createRace({
+                status: 'IN_PROGRESS',
+            }),
+        )
+
+        renderRaceDetail(['ADMINISTRATOR'], undefined, 'administrator')
+
+        await screen.findByRole('heading', { name: 'Desert Dawn Race' })
+
+        expect(
+            screen.getByRole('link', { name: 'View results' }),
+        ).toBeInTheDocument()
+        expect(
+            screen.queryByRole('link', { name: 'Edit race' }),
+        ).not.toBeInTheDocument()
+        expect(
+            screen.queryByRole('button', { name: 'Cancel race' }),
+        ).not.toBeInTheDocument()
+        expect(
+            screen.getByRole('button', { name: 'Complete race' }),
+        ).toBeInTheDocument()
+    })
+
     it('shows result link for viewer role without management actions', async () => {
         getRaceById.mockResolvedValueOnce(createRace())
 
@@ -138,6 +163,12 @@ describe('RaceDetailPage', () => {
         ).not.toBeInTheDocument()
         expect(
             screen.queryByRole('button', { name: 'Open registration' }),
+        ).not.toBeInTheDocument()
+        expect(
+            screen.queryByRole('button', { name: 'Reopen registration' }),
+        ).not.toBeInTheDocument()
+        expect(
+            screen.queryByRole('button', { name: 'Start race' }),
         ).not.toBeInTheDocument()
         expect(
             screen.queryByRole('button', { name: 'Cancel race' }),
@@ -169,6 +200,28 @@ describe('RaceDetailPage', () => {
         ).toBeInTheDocument()
     })
 
+    it('shows reopen and start actions for closed registration', async () => {
+        getRaceById.mockResolvedValueOnce(
+            createRace({
+                status: 'CLOSED_FOR_REGISTRATION',
+            }),
+        )
+
+        renderRaceDetail(['RACE_ORGANIZER'], undefined, 'organizer')
+
+        await screen.findByRole('heading', { name: 'Desert Dawn Race' })
+
+        expect(
+            screen.getByRole('button', { name: 'Reopen registration' }),
+        ).toBeInTheDocument()
+        expect(
+            screen.getByRole('button', { name: 'Start race' }),
+        ).toBeInTheDocument()
+        expect(
+            screen.getByRole('button', { name: 'Cancel race' }),
+        ).toBeInTheDocument()
+    })
+
     it('hides management actions for non-owner organizer role', async () => {
         getRaceById.mockResolvedValueOnce(createRace())
 
@@ -187,6 +240,9 @@ describe('RaceDetailPage', () => {
         ).not.toBeInTheDocument()
         expect(
             screen.queryByRole('button', { name: 'Open registration' }),
+        ).not.toBeInTheDocument()
+        expect(
+            screen.queryByRole('button', { name: 'Reopen registration' }),
         ).not.toBeInTheDocument()
         expect(
             screen.queryByRole('button', { name: 'Cancel race' }),
@@ -237,6 +293,9 @@ describe('RaceDetailPage', () => {
         ).not.toBeInTheDocument()
         expect(
             screen.queryByRole('button', { name: 'Complete race' }),
+        ).not.toBeInTheDocument()
+        expect(
+            screen.queryByRole('button', { name: 'Reopen registration' }),
         ).not.toBeInTheDocument()
         expect(
             screen.queryByRole('button', { name: 'Cancel race' }),
@@ -302,6 +361,61 @@ describe('RaceDetailPage', () => {
         fireEvent.click(
             within(dialog).getByRole('button', {
                 name: 'Open registration',
+            }),
+        )
+
+        await waitFor(() => {
+            expect(updateRaceStatus).toHaveBeenCalledWith(
+                '2f173f4a-2059-4f42-a591-394183aec8f0',
+                {
+                    status: 'OPEN_FOR_REGISTRATION',
+                },
+            )
+        })
+
+        expect(
+            await screen.findByText(
+                'Race status changed to Open For Registration.',
+            ),
+        ).toBeInTheDocument()
+        expect(
+            screen.getByRole('button', { name: 'Close registration' }),
+        ).toBeInTheDocument()
+    })
+
+    it('reopens registration after confirmation and shows close action', async () => {
+        getRaceById.mockResolvedValueOnce(
+            createRace({
+                status: 'CLOSED_FOR_REGISTRATION',
+            }),
+        )
+        updateRaceStatus.mockResolvedValueOnce(
+            createRace({
+                status: 'OPEN_FOR_REGISTRATION',
+            }),
+        )
+
+        renderRaceDetail(['RACE_ORGANIZER'], undefined, 'organizer')
+
+        fireEvent.click(
+            await screen.findByRole('button', {
+                name: 'Reopen registration',
+            }),
+        )
+
+        const dialog = screen.getByRole('dialog', {
+            name: 'Reopen registration',
+        })
+
+        expect(
+            within(dialog).getByText(
+                'This will allow eligible participants to register for the race again.',
+            ),
+        ).toBeInTheDocument()
+
+        fireEvent.click(
+            within(dialog).getByRole('button', {
+                name: 'Reopen registration',
             }),
         )
 

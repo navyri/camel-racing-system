@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,17 +60,22 @@ class CompetitorServiceTest {
         private CompetitorService competitorService;
 
         @Test
-        @DisplayName("creates a valid competitor with initial values")
-        void createsValidCompetitorWithInitialValues() {
+        @DisplayName("creates a valid competitor with initial values and audit log")
+        void createsValidCompetitorWithInitialValuesAndAuditLog() {
+                UUID competitorId = UUID.randomUUID();
+                User currentUser = user("administrator");
+
                 when(competitorRepository.findByNicknameIgnoreCase("ByteTheCamel"))
                                 .thenReturn(Optional.empty());
 
                 when(competitorRepository.save(any(Competitor.class)))
                                 .thenAnswer(invocation -> {
                                         Competitor competitor = invocation.getArgument(0);
-                                        competitor.setId(UUID.randomUUID());
+                                        competitor.setId(competitorId);
                                         return competitor;
                                 });
+
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(currentUser);
 
                 CompetitorResponse response = competitorService.createCompetitor(requestWithDateOfBirth());
 
@@ -78,12 +84,24 @@ class CompetitorServiceTest {
 
                 Competitor savedCompetitor = captor.getValue();
 
-                assertThat(response.id()).isNotNull();
+                assertThat(response.id()).isEqualTo(competitorId);
                 assertThat(savedCompetitor.getStatus()).isEqualTo(CompetitorStatus.ACTIVE);
                 assertThat(savedCompetitor.getRegistrationDate()).isNotNull();
                 assertThat(savedCompetitor.getVictories()).isZero();
                 assertThat(savedCompetitor.getDefeats()).isZero();
                 assertThat(savedCompetitor.getCompletedRaces()).isZero();
+
+                verify(currentUserService).getOrSynchronizeCurrentUser();
+                verify(auditLogService).log(
+                                eq(currentUser),
+                                eq(AuditLogService.ACTION_COMPETITOR_CREATED),
+                                eq("COMPETITOR"),
+                                eq(competitorId.toString()),
+                                eq("Competitor created"),
+                                eq(null),
+                                eq("name=Byte, nickname=ByteTheCamel, competitorType=CAMEL, "
+                                                + "dateOfBirth=2016-05-20, approximateAge=null, "
+                                                + "weightKg=400.00, heightCm=220.00, origin=Colombia, status=ACTIVE"));
         }
 
         @Test
@@ -97,6 +115,17 @@ class CompetitorServiceTest {
                 assertThatThrownBy(() -> competitorService.createCompetitor(requestWithDateOfBirth()))
                                 .isInstanceOf(ConflictException.class)
                                 .hasMessage("Nickname is already in use");
+
+                verify(competitorRepository, never()).save(any(Competitor.class));
+                verify(currentUserService, never()).getOrSynchronizeCurrentUser();
+                verify(auditLogService, never()).log(
+                                any(User.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class));
         }
 
         @Test
@@ -125,8 +154,12 @@ class CompetitorServiceTest {
                                 eq("COMPETITOR"),
                                 eq(id.toString()),
                                 eq("Competitor information updated"),
-                                eq("name=Byte, nickname=ByteTheCamel, competitorType=CAMEL, dateOfBirth=2016-05-20, approximateAge=null, weightKg=400.00, heightCm=220.00, origin=Colombia, status=ACTIVE"),
-                                eq("name=Byte, nickname=ByteTheCamel, competitorType=CAMEL, dateOfBirth=2016-05-20, approximateAge=null, weightKg=400.00, heightCm=220.00, origin=Colombia, status=ACTIVE"));
+                                eq("name=Byte, nickname=ByteTheCamel, competitorType=CAMEL, "
+                                                + "dateOfBirth=2016-05-20, approximateAge=null, "
+                                                + "weightKg=400.00, heightCm=220.00, origin=Colombia, status=ACTIVE"),
+                                eq("name=Byte, nickname=ByteTheCamel, competitorType=CAMEL, "
+                                                + "dateOfBirth=2016-05-20, approximateAge=null, "
+                                                + "weightKg=400.00, heightCm=220.00, origin=Colombia, status=ACTIVE"));
         }
 
         @Test

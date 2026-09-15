@@ -1,5 +1,6 @@
 package com.eia.camelracing.race.service;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -47,9 +48,16 @@ public class RaceService {
     private static final List<RegistrationStatus> APPROVED_REGISTRATION_STATUSES = List.of(
             RegistrationStatus.APPROVED);
 
+    private static final List<RaceStatus> UPCOMING_EXCLUDED_STATUSES = List.of(
+            RaceStatus.COMPLETED,
+            RaceStatus.CANCELLED);
+
     private static final int DEFAULT_PAGE = 0;
     private static final int DEFAULT_SIZE = 10;
     private static final int MAX_SIZE = 100;
+
+    private static final int DEFAULT_UPCOMING_LIMIT = 5;
+    private static final int MAX_UPCOMING_LIMIT = 100;
 
     private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
             "name",
@@ -75,7 +83,18 @@ public class RaceService {
         race.setCreatedAt(now);
         race.setUpdatedAt(now);
 
-        return RaceMapper.toResponse(raceRepository.save(race));
+        Race savedRace = raceRepository.save(race);
+
+        auditLogService.log(
+                organizer,
+                AuditLogService.ACTION_RACE_CREATED,
+                "RACE",
+                savedRace.getId().toString(),
+                "Race created",
+                null,
+                raceSnapshot(savedRace));
+
+        return RaceMapper.toResponse(savedRace);
     }
 
     @Transactional(readOnly = true)
@@ -98,6 +117,22 @@ public class RaceService {
     }
 
     @Transactional(readOnly = true)
+    public List<RaceResponse> getUpcomingRaces(Integer limit) {
+        int resolvedLimit = resolveUpcomingLimit(limit);
+        Pageable pageable = PageRequest.of(
+                0,
+                resolvedLimit,
+                Sort.by("scheduledAt").ascending());
+
+        return raceRepository.findUpcomingRaces(
+                LocalDateTime.now(),
+                UPCOMING_EXCLUDED_STATUSES,
+                pageable).stream()
+                .map(RaceMapper::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public RaceResponse getRaceById(UUID id) {
         return RaceMapper.toResponse(findRaceById(id));
     }
@@ -109,8 +144,9 @@ public class RaceService {
 
         validateRaceManagementPermission(race, currentUser);
 
-        if (isTerminal(race.getStatus())) {
-            throw new ConflictException("Terminal races cannot be updated");
+        if (isRaceLockedForUpdate(race.getStatus())) {
+            throw new ConflictException(
+                    "In-progress or terminal races cannot be updated");
         }
 
         RaceMapper.updateEntity(race, request);
@@ -129,13 +165,8 @@ public class RaceService {
         validateMinimumApprovedParticipants(race, request.status());
 
         if (race.getStatus() == RaceStatus.IN_PROGRESS
-                && request.status() == RaceStatus.COMPLETED
-                && !resultRepository.existsOfficialWinnerByRaceId(
-                        race.getId(),
-                        ResultStatus.FINISHED,
-                        WINNER_POSITION)) {
-            throw new ConflictException(
-                    "Race cannot be completed without an official winner");
+                && request.status() == RaceStatus.COMPLETED) {
+            validateRaceCompletion(race);
         }
 
         RaceStatus previousStatus = race.getStatus();
@@ -154,6 +185,24 @@ public class RaceService {
                     "Race cancelled",
                     "status=" + previousStatus,
                     "status=" + RaceStatus.CANCELLED);
+        } else if (request.status() == RaceStatus.COMPLETED) {
+            auditLogService.log(
+                    currentUser,
+                    AuditLogService.ACTION_RACE_COMPLETED,
+                    "RACE",
+                    savedRace.getId().toString(),
+                    "Race completed",
+                    "status=" + previousStatus,
+                    "status=" + RaceStatus.COMPLETED);
+        } else {
+            auditLogService.log(
+                    currentUser,
+                    AuditLogService.ACTION_RACE_STATUS_CHANGED,
+                    "RACE",
+                    savedRace.getId().toString(),
+                    "Race status changed",
+                    "status=" + previousStatus,
+                    "status=" + request.status());
         }
 
         return RaceMapper.toResponse(savedRace);
@@ -217,6 +266,26 @@ public class RaceService {
         }
     }
 
+    private void validateRaceCompletion(Race race) {
+        if (!resultRepository.existsOfficialWinnerByRaceId(
+                race.getId(),
+                ResultStatus.FINISHED,
+                WINNER_POSITION)) {
+            throw new ConflictException(
+                    "Race cannot be completed without an official winner");
+        }
+
+        long approvedRegistrationsWithoutResult = registrationRepository
+                .countByRaceIdAndStatusWithoutResult(
+                        race.getId(),
+                        RegistrationStatus.APPROVED);
+
+        if (approvedRegistrationsWithoutResult > 0) {
+            throw new ConflictException(
+                    "Race cannot be completed while approved participants have no official result");
+        }
+    }
+
     private void validateRaceManagementPermission(Race race, User currentUser) {
         if (hasAdministratorRole()) {
             return;
@@ -229,7 +298,8 @@ public class RaceService {
     }
 
     private boolean hasAdministratorRole() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        Authentication authentication = SecurityContextHolder.getContext()
+                .getAuthentication();
 
         if (authentication == null) {
             return false;
@@ -257,7 +327,8 @@ public class RaceService {
                     || requestedStatus == RaceStatus.CANCELLED;
             case OPEN_FOR_REGISTRATION -> requestedStatus == RaceStatus.CLOSED_FOR_REGISTRATION
                     || requestedStatus == RaceStatus.CANCELLED;
-            case CLOSED_FOR_REGISTRATION -> requestedStatus == RaceStatus.IN_PROGRESS
+            case CLOSED_FOR_REGISTRATION -> requestedStatus == RaceStatus.OPEN_FOR_REGISTRATION
+                    || requestedStatus == RaceStatus.IN_PROGRESS
                     || requestedStatus == RaceStatus.CANCELLED;
             case IN_PROGRESS -> requestedStatus == RaceStatus.COMPLETED;
             case COMPLETED, CANCELLED -> false;
@@ -272,8 +343,10 @@ public class RaceService {
         }
     }
 
-    private boolean isTerminal(RaceStatus status) {
-        return status == RaceStatus.COMPLETED || status == RaceStatus.CANCELLED;
+    private boolean isRaceLockedForUpdate(RaceStatus status) {
+        return status == RaceStatus.IN_PROGRESS
+                || status == RaceStatus.COMPLETED
+                || status == RaceStatus.CANCELLED;
     }
 
     private Pageable buildPageable(Integer page, Integer size, String sort) {
@@ -285,10 +358,22 @@ public class RaceService {
         }
 
         if (resolvedSize < 1 || resolvedSize > MAX_SIZE) {
-            throw new IllegalArgumentException("Size must be between 1 and " + MAX_SIZE);
+            throw new IllegalArgumentException(
+                    "Size must be between 1 and " + MAX_SIZE);
         }
 
         return PageRequest.of(resolvedPage, resolvedSize, buildSort(sort));
+    }
+
+    private int resolveUpcomingLimit(Integer limit) {
+        int resolvedLimit = limit == null ? DEFAULT_UPCOMING_LIMIT : limit;
+
+        if (resolvedLimit < 1 || resolvedLimit > MAX_UPCOMING_LIMIT) {
+            throw new IllegalArgumentException(
+                    "Limit must be between 1 and " + MAX_UPCOMING_LIMIT);
+        }
+
+        return resolvedLimit;
     }
 
     private Sort buildSort(String sort) {
@@ -299,7 +384,8 @@ public class RaceService {
         String[] parts = resolvedSort.split(",", -1);
 
         if (parts.length != 2) {
-            throw new IllegalArgumentException("Sort must use the format field,direction");
+            throw new IllegalArgumentException(
+                    "Sort must use the format field,direction");
         }
 
         String field = parts[0].trim();
@@ -317,7 +403,8 @@ public class RaceService {
             return Sort.by(field).descending();
         }
 
-        throw new IllegalArgumentException("Sort direction must be asc or desc");
+        throw new IllegalArgumentException(
+                "Sort direction must be asc or desc");
     }
 
     private String normalizeFilter(String value) {
@@ -326,5 +413,27 @@ public class RaceService {
         }
 
         return value.trim();
+    }
+
+    private String raceSnapshot(Race race) {
+        return "name=" + race.getName()
+                + ", description=" + valueOf(race.getDescription())
+                + ", scheduledAt=" + race.getScheduledAt()
+                + ", startLocation=" + race.getStartLocation()
+                + ", finishLocation=" + race.getFinishLocation()
+                + ", distanceMeters=" + decimalValue(race.getDistanceMeters())
+                + ", maxParticipants=" + race.getMaxParticipants()
+                + ", raceType=" + race.getRaceType()
+                + ", status=" + race.getStatus()
+                + ", registrationDeadline=" + race.getRegistrationDeadline()
+                + ", organizerUsername=" + race.getOrganizer().getUsername();
+    }
+
+    private String decimalValue(BigDecimal value) {
+        return value == null ? "null" : value.toPlainString();
+    }
+
+    private String valueOf(String value) {
+        return value == null ? "null" : value;
     }
 }

@@ -4,20 +4,8 @@ BEGIN;
 
 DO $$
 DECLARE
-    users_count integer;
-BEGIN
-    SELECT COUNT(*)
-    INTO users_count
-    FROM users;
-
-    IF users_count < 2 THEN
-        RAISE EXCEPTION 'Expected at least 2 local users, found %', users_count;
-    END IF;
-END $$;
-
-DO $$
-DECLARE
     business_data_count integer;
+    security_data_count integer;
 BEGIN
     SELECT
         (SELECT COUNT(*) FROM competitors) +
@@ -27,41 +15,117 @@ BEGIN
         (SELECT COUNT(*) FROM race_results)
     INTO business_data_count;
 
+    SELECT
+        (SELECT COUNT(*) FROM users) +
+        (SELECT COUNT(*) FROM roles) +
+        (SELECT COUNT(*) FROM user_roles)
+    INTO security_data_count;
+
     IF business_data_count > 0 THEN
-        RAISE EXCEPTION 'Seed aborted because business data already exists. Clean the database first or use a new seed strategy.';
+        RAISE EXCEPTION
+            'Seed aborted because business data already exists. Clean the database first or use a new seed strategy.';
+    END IF;
+
+    IF security_data_count > 0 THEN
+        RAISE EXCEPTION
+            'Seed aborted because users or roles already exist. Clean the database first or use a new seed strategy.';
     END IF;
 END $$;
 
 CREATE TEMP TABLE demo_context (
     admin_user_id uuid NOT NULL,
-    organizer_user_id uuid NOT NULL
+    organizer_user_id uuid NOT NULL,
+    viewer_user_id uuid NOT NULL
 ) ON COMMIT DROP;
+
+INSERT INTO roles (
+    id,
+    description,
+    name
+) VALUES
+(
+    '70000000-0000-0000-0000-000000000001'::uuid,
+    'Full access to users, competitors, teams, races, registrations, results and audit logs.',
+    'ADMINISTRATOR'
+),
+(
+    '70000000-0000-0000-0000-000000000002'::uuid,
+    'Can manage races, registrations and results, and view competitors and teams.',
+    'RACE_ORGANIZER'
+),
+(
+    '70000000-0000-0000-0000-000000000003'::uuid,
+    'Read-only access to public races, results and standings.',
+    'VIEWER'
+);
+
+INSERT INTO users (
+    id,
+    created_at,
+    email,
+    enabled,
+    first_name,
+    keycloak_subject,
+    last_name,
+    username
+) VALUES
+(
+    '80000000-0000-0000-0000-000000000001'::uuid,
+    '2026-09-14 09:00:00'::timestamp,
+    'admin@camel-racing.test',
+    TRUE,
+    'Demo',
+    '69ef73d0-bb6f-40e7-9f5a-518fd43385d8',
+    'Administrator',
+    'admin'
+),
+(
+    '80000000-0000-0000-0000-000000000002'::uuid,
+    '2026-09-14 09:01:00'::timestamp,
+    'organizer@camel-racing.test',
+    TRUE,
+    'Demo',
+    'a0aee218-9ed9-4872-91a7-2d7e528ae74c',
+    'Organizer',
+    'organizer'
+),
+(
+    '80000000-0000-0000-0000-000000000003'::uuid,
+    '2026-09-14 09:02:00'::timestamp,
+    'viewer@camel-racing.test',
+    TRUE,
+    'Demo',
+    '15a4ccfb-6543-48c6-be83-9fa40c2c7b50',
+    'Viewer',
+    'viewer'
+);
+
+INSERT INTO user_roles (
+    user_id,
+    role_id
+) VALUES
+(
+    '80000000-0000-0000-0000-000000000001'::uuid,
+    '70000000-0000-0000-0000-000000000001'::uuid
+),
+(
+    '80000000-0000-0000-0000-000000000002'::uuid,
+    '70000000-0000-0000-0000-000000000002'::uuid
+),
+(
+    '80000000-0000-0000-0000-000000000003'::uuid,
+    '70000000-0000-0000-0000-000000000003'::uuid
+);
 
 INSERT INTO demo_context (
     admin_user_id,
-    organizer_user_id
-)
-SELECT
-    (SELECT id FROM users ORDER BY id LIMIT 1),
-    (SELECT id FROM users ORDER BY id OFFSET 1 LIMIT 1);
-
-DO $$
-DECLARE
-    admin_id uuid;
-    organizer_id uuid;
-BEGIN
-    SELECT
-        admin_user_id,
-        organizer_user_id
-    INTO
-        admin_id,
-        organizer_id
-    FROM demo_context;
-
-    IF admin_id IS NULL OR organizer_id IS NULL THEN
-        RAISE EXCEPTION 'Could not resolve two users for demo ownership.';
-    END IF;
-END $$;
+    organizer_user_id,
+    viewer_user_id
+) VALUES (
+    '80000000-0000-0000-0000-000000000001'::uuid,
+    '80000000-0000-0000-0000-000000000002'::uuid,
+    '80000000-0000-0000-0000-000000000003'::uuid
+);
 
 INSERT INTO competitors (
     id,
@@ -98,7 +162,7 @@ INSERT INTO competitors (
 (
     '10000000-0000-0000-0000-000000000002'::uuid,
     20,
-    'MEDIUM',
+    'DWARF',
     1,
     NULL::date,
     1,
@@ -130,7 +194,7 @@ INSERT INTO competitors (
 (
     '10000000-0000-0000-0000-000000000004'::uuid,
     27,
-    'MEDIUM',
+    'DWARF',
     1,
     NULL::date,
     1,
@@ -178,7 +242,7 @@ INSERT INTO competitors (
 (
     '10000000-0000-0000-0000-000000000007'::uuid,
     31,
-    'CAMEL',
+    'MEDIUM',
     1,
     NULL::date,
     1,
@@ -206,6 +270,22 @@ INSERT INTO competitors (
     'ACTIVE',
     0,
     55.00::numeric
+),
+(
+    '10000000-0000-0000-0000-000000000009'::uuid,
+    23,
+    'DWARF',
+    0,
+    NULL::date,
+    0,
+    154.00::numeric,
+    'Tiny Docker',
+    'Container Scout',
+    'Copper Dune Outpost',
+    '2026-08-20 09:40:00'::timestamp,
+    'ACTIVE',
+    0,
+    47.00::numeric
 );
 
 INSERT INTO teams (
@@ -748,6 +828,13 @@ SELECT
     COUNT(*)
 FROM race_results
 ORDER BY table_name;
+
+SELECT
+    competitor_type,
+    COUNT(*) AS total
+FROM competitors
+GROUP BY competitor_type
+ORDER BY competitor_type;
 
 SELECT
     r.name AS race_name,

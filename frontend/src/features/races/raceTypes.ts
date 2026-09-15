@@ -106,33 +106,48 @@ export interface RaceStatusTransition {
 
 const raceStatusTransitions: Record<
     Exclude<RaceStatus, 'COMPLETED' | 'CANCELLED'>,
-    RaceStatusTransition
+    RaceStatusTransition[]
 > = {
-    DRAFT: {
-        currentStatus: 'DRAFT',
-        nextStatus: 'OPEN_FOR_REGISTRATION',
-        actionLabel: 'Open registration',
-        description: 'This will allow eligible participants to register for the race.',
-    },
-    OPEN_FOR_REGISTRATION: {
-        currentStatus: 'OPEN_FOR_REGISTRATION',
-        nextStatus: 'CLOSED_FOR_REGISTRATION',
-        actionLabel: 'Close registration',
-        description: 'This will close registration for new participants.',
-    },
-    CLOSED_FOR_REGISTRATION: {
-        currentStatus: 'CLOSED_FOR_REGISTRATION',
-        nextStatus: 'IN_PROGRESS',
-        actionLabel: 'Start race',
-        description: 'This will mark the race as in progress.',
-    },
-    IN_PROGRESS: {
-        currentStatus: 'IN_PROGRESS',
-        nextStatus: 'COMPLETED',
-        actionLabel: 'Complete race',
-        description:
-            'The race can only be completed when an official finished winner is recorded in first position.',
-    },
+    DRAFT: [
+        {
+            currentStatus: 'DRAFT',
+            nextStatus: 'OPEN_FOR_REGISTRATION',
+            actionLabel: 'Open registration',
+            description: 'This will allow eligible participants to register for the race.',
+        },
+    ],
+    OPEN_FOR_REGISTRATION: [
+        {
+            currentStatus: 'OPEN_FOR_REGISTRATION',
+            nextStatus: 'CLOSED_FOR_REGISTRATION',
+            actionLabel: 'Close registration',
+            description: 'This will close registration for new participants.',
+        },
+    ],
+    CLOSED_FOR_REGISTRATION: [
+        {
+            currentStatus: 'CLOSED_FOR_REGISTRATION',
+            nextStatus: 'OPEN_FOR_REGISTRATION',
+            actionLabel: 'Reopen registration',
+            description:
+                'This will allow eligible participants to register for the race again.',
+        },
+        {
+            currentStatus: 'CLOSED_FOR_REGISTRATION',
+            nextStatus: 'IN_PROGRESS',
+            actionLabel: 'Start race',
+            description: 'This will mark the race as in progress.',
+        },
+    ],
+    IN_PROGRESS: [
+        {
+            currentStatus: 'IN_PROGRESS',
+            nextStatus: 'COMPLETED',
+            actionLabel: 'Complete race',
+            description:
+                'The race can only be completed when an official finished winner is recorded in first position.',
+        },
+    ],
 }
 
 export function createDefaultRaceListFilters(): RaceListFilters {
@@ -187,11 +202,11 @@ export function isSortDirection(value: string): value is SortDirection {
     return sortDirections.includes(value as SortDirection)
 }
 
-export function getAvailableRaceStatusTransition(
+export function getAvailableRaceStatusTransitions(
     status: RaceStatus,
-): RaceStatusTransition | null {
+): RaceStatusTransition[] {
     if (status === 'COMPLETED' || status === 'CANCELLED') {
-        return null
+        return []
     }
 
     return raceStatusTransitions[status]
@@ -207,6 +222,14 @@ export function canCancelRace(status: RaceStatus): boolean {
 
 export function isTerminalRaceStatus(status: RaceStatus): boolean {
     return status === 'COMPLETED' || status === 'CANCELLED'
+}
+
+export function isRaceLockedForUpdate(status: RaceStatus): boolean {
+    return (
+        status === 'IN_PROGRESS' ||
+        status === 'COMPLETED' ||
+        status === 'CANCELLED'
+    )
 }
 
 export function validateRaceForm(

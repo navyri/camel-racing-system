@@ -13,10 +13,11 @@ import { formatDateTime } from '../../utils/dateFormat'
 import { RaceStatusDialog } from './RaceStatusDialog'
 import {
     canCancelRace,
-    getAvailableRaceStatusTransition,
-    isTerminalRaceStatus,
+    getAvailableRaceStatusTransitions,
+    isRaceLockedForUpdate,
     type RaceResponse,
     type RaceStatus,
+    type RaceStatusTransition,
 } from './raceTypes'
 
 interface DetailLocationState {
@@ -177,17 +178,7 @@ export function RaceDetailPage() {
         }
     }
 
-    function openStatusDialog() {
-        if (!race) {
-            return
-        }
-
-        const transition = getAvailableRaceStatusTransition(race.status)
-
-        if (!transition) {
-            return
-        }
-
+    function openStatusDialog(transition: RaceStatusTransition) {
         actionTriggerRef.current =
             document.activeElement instanceof HTMLButtonElement
                 ? document.activeElement
@@ -322,10 +313,10 @@ export function RaceDetailPage() {
         auth?.hasRole('RACE_ORGANIZER') === true &&
         auth.user?.username === race.organizerUsername
     const canManageRace = isAdministrator || isOwnerOrganizer
-    const transition = getAvailableRaceStatusTransition(race.status)
-    const isTerminal = isTerminalRaceStatus(race.status)
-    const canEdit = canManageRace && !isTerminal
-    const canOpenStatusAction = canManageRace && transition !== null
+    const transitions = getAvailableRaceStatusTransitions(race.status)
+    const isLockedForUpdate = isRaceLockedForUpdate(race.status)
+    const canEdit = canManageRace && !isLockedForUpdate
+    const canOpenStatusAction = canManageRace && transitions.length > 0
     const canOpenCancelAction = canManageRace && canCancelRace(race.status)
 
     return (
@@ -451,15 +442,22 @@ export function RaceDetailPage() {
                     </Link>
                 ) : null}
 
-                {canOpenStatusAction && transition ? (
-                    <button
-                        ref={actionTriggerRef}
-                        type="button"
-                        onClick={openStatusDialog}
-                    >
-                        {transition.actionLabel}
-                    </button>
-                ) : null}
+                {canOpenStatusAction
+                    ? transitions.map((transition) => (
+                        <button
+                            key={transition.nextStatus}
+                            ref={
+                                transition.nextStatus === transitions[0]?.nextStatus
+                                    ? actionTriggerRef
+                                    : undefined
+                            }
+                            type="button"
+                            onClick={() => openStatusDialog(transition)}
+                        >
+                            {transition.actionLabel}
+                        </button>
+                    ))
+                    : null}
 
                 {canOpenCancelAction ? (
                     <button

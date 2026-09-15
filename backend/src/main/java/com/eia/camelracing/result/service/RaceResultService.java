@@ -34,6 +34,9 @@ import com.eia.camelracing.user.entity.User;
 
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -47,14 +50,16 @@ public class RaceResultService {
 
     private static final int WINNER_POSITION = 1;
 
+    private static final int DEFAULT_RECENT_LIMIT = 5;
+    private static final int MAX_RECENT_LIMIT = 100;
+
     private static final List<ResultStatus> COMPLETED_RACE_STATUSES = List.of(
             ResultStatus.FINISHED,
             ResultStatus.DID_NOT_FINISH,
             ResultStatus.DISQUALIFIED);
 
     private static final Comparator<RaceResult> FINISHED_RESULT_COMPARATOR = Comparator
-            .comparing(RaceResult::getCompletionTime)
-            .thenComparing(RaceResult::getPenaltyTime)
+            .comparing(RaceResultService::getEffectiveTime)
             .thenComparing(RaceResult::getRecordedAt)
             .thenComparing(RaceResult::getId);
 
@@ -108,6 +113,15 @@ public class RaceResultService {
 
         recalculateStatisticsForResults(affectedResults);
 
+        auditLogService.log(
+                currentUser,
+                AuditLogService.ACTION_RESULT_CREATED,
+                "RESULT",
+                savedResult.getId().toString(),
+                "Race result created",
+                null,
+                resultSnapshot(savedResult));
+
         return RaceResultMapper.toResponse(savedResult);
     }
 
@@ -118,6 +132,19 @@ public class RaceResultService {
         return resultRepository.findDetailedByRaceId(
                 raceId,
                 ResultStatus.FINISHED).stream()
+                .map(RaceResultMapper::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<RaceResultResponse> getRecentResults(Integer limit) {
+        int resolvedLimit = resolveRecentLimit(limit);
+        Pageable pageable = PageRequest.of(
+                0,
+                resolvedLimit,
+                Sort.by("recordedAt").descending());
+
+        return resultRepository.findRecentDetailedResults(pageable).stream()
                 .map(RaceResultMapper::toResponse)
                 .toList();
     }
@@ -231,6 +258,10 @@ public class RaceResultService {
         return finishedResults;
     }
 
+    private static Duration getEffectiveTime(RaceResult result) {
+        return result.getCompletionTime().plus(result.getPenaltyTime());
+    }
+
     private void recalculateStatisticsForResults(List<RaceResult> results) {
         Set<UUID> competitorIds = new HashSet<>();
         Set<UUID> teamIds = new HashSet<>();
@@ -308,7 +339,8 @@ public class RaceResultService {
     }
 
     private boolean hasAdministratorRole() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        Authentication authentication = SecurityContextHolder.getContext()
+                .getAuthentication();
 
         if (authentication == null) {
             return false;
@@ -336,6 +368,17 @@ public class RaceResultService {
                         "Result with id " + id + " was not found"));
     }
 
+    private int resolveRecentLimit(Integer limit) {
+        int resolvedLimit = limit == null ? DEFAULT_RECENT_LIMIT : limit;
+
+        if (resolvedLimit < 1 || resolvedLimit > MAX_RECENT_LIMIT) {
+            throw new IllegalArgumentException(
+                    "Limit must be between 1 and " + MAX_RECENT_LIMIT);
+        }
+
+        return resolvedLimit;
+    }
+
     private String normalizeNotes(String notes) {
         if (notes == null || notes.isBlank()) {
             return null;
@@ -345,11 +388,18 @@ public class RaceResultService {
     }
 
     private String resultSnapshot(RaceResult result) {
-        return "finalPosition=" + valueOf(result.getFinalPosition())
-                + ", completionTimeSeconds=" + durationSeconds(result.getCompletionTime())
-                + ", penaltyTimeSeconds=" + durationSeconds(result.getPenaltyTime())
+        RaceRegistration registration = result.getRegistration();
+
+        return "raceId=" + registration.getRace().getId()
+                + ", registrationId=" + registration.getId()
+                + ", finalPosition=" + valueOf(result.getFinalPosition())
+                + ", completionTimeSeconds="
+                + durationSeconds(result.getCompletionTime())
+                + ", penaltyTimeSeconds="
+                + durationSeconds(result.getPenaltyTime())
                 + ", status=" + result.getStatus()
-                + ", notes=" + valueOf(result.getNotes());
+                + ", notes=" + valueOf(result.getNotes())
+                + ", recordedByUsername=" + result.getRecordedBy().getUsername();
     }
 
     private String durationSeconds(Duration duration) {

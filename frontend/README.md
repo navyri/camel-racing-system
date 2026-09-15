@@ -1,6 +1,6 @@
 <p align="center">
   <img
-    src="https://capsule-render.vercel.app/api?type=waving&height=190&color=6d3f15&text=Camel%20Racing%20Frontend&fontColor=FFF4E0&fontSize=40&fontAlignY=36&desc=React%20%2B%20TypeScript%20%2B%20Vite&descAlignY=59&descSize=18"
+    src="https://capsule-render.vercel.app/api?type=waving&height=190&color=6d3f15&text=Camel%20Racing%20Frontend&fontColor=FFF4E0&fontSize=40&fontAlignY=36&desc=React%20%2B%20TypeScript%20%2B%20Vite%20%2B%20Nginx&descAlignY=59&descSize=18"
     alt="Camel Racing Frontend"
   />
 </p>
@@ -22,7 +22,9 @@
   ·
   <a href="#requisitos">Requisitos</a>
   ·
-  <a href="#instalacion-y-ejecucion">Ejecucion</a>
+  <a href="#ejecucion-con-docker">Docker</a>
+  ·
+  <a href="#desarrollo-local">Desarrollo local</a>
   ·
   <a href="#modulos">Modulos</a>
   ·
@@ -40,6 +42,8 @@
 
 Este directorio contiene el frontend de Camel Racing System. La interfaz fue construida con React, TypeScript y Vite, y permite consumir de forma autenticada la API REST del backend.
 
+Para la ejecucion completa con Docker, Vite compila la aplicacion y Nginx sirve el build de produccion. Esto permite que toda la solucion se inicie con un unico comando de Docker Compose.
+
 La aplicacion adapta las acciones disponibles segun el rol autenticado. El backend mantiene siempre la validacion definitiva de permisos y reglas de negocio.
 
 La direccion visual del proyecto es **Dark Desert Shrine**, con una estetica de registro antiguo de carreras, expedicion por el desierto y club de competencia misterioso.
@@ -50,7 +54,8 @@ La direccion visual del proyecto es **Dark Desert Shrine**, con una estetica de 
 |---|---|
 | React | Construccion de la interfaz |
 | TypeScript | Tipado estatico y contratos de frontend |
-| Vite | Servidor de desarrollo y build de produccion |
+| Vite | Desarrollo local y build de produccion |
+| Nginx | Servicio del build de produccion dentro de Docker |
 | Keycloak JS | Autenticacion mediante OpenID Connect |
 | Vitest | Ejecucion de pruebas unitarias |
 | Testing Library | Pruebas de componentes e interacciones |
@@ -58,36 +63,106 @@ La direccion visual del proyecto es **Dark Desert Shrine**, con una estetica de 
 
 ## Requisitos
 
-Antes de iniciar el frontend, deben estar disponibles:
+Para ejecutar la solucion completa con Docker:
+
+| Herramienta | Uso |
+|---|---|
+| Docker Desktop | Construye y ejecuta todos los servicios |
+| Docker Compose | Orquesta frontend, backend, PostgreSQL y Keycloak |
+
+Para desarrollo local del frontend y ejecucion de pruebas:
+
+| Herramienta | Uso |
+|---|---|
+| Node.js | Instalar dependencias y ejecutar Vite |
+| npm | Scripts de desarrollo, lint, pruebas y build |
+
+Los servicios esperados son:
 
 | Servicio | Direccion |
 |---|---|
+| Frontend | `http://localhost:5173` |
 | Backend Spring Boot | `http://localhost:8080` |
 | Keycloak | `http://localhost:8180` |
-| Frontend Vite | `http://localhost:5173` |
 
-Inicia PostgreSQL, Keycloak y el backend desde la raiz del repositorio:
+## Ejecucion con Docker
+
+Desde la raiz del repositorio:
 
 ```powershell
-docker compose up -d --build
+docker compose up -d
+```
+
+Este comando construye el frontend con Vite y lo sirve con Nginx junto con los demas servicios del sistema.
+
+Verifica los contenedores:
+
+```powershell
 docker compose ps
 ```
 
-Verifica el backend:
+Abre la interfaz:
+
+```text
+http://localhost:5173
+```
+
+Verifica el health check del frontend:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing http://localhost:8080/actuator/health
+Invoke-WebRequest -UseBasicParsing http://localhost:5173/health
+```
+
+Si realizas cambios en el codigo fuente y necesitas reconstruir la imagen:
+
+```powershell
+docker compose up -d --build frontend
+```
+
+Para consultar logs:
+
+```powershell
+docker compose logs -f frontend
+```
+
+## Desarrollo local
+
+Para trabajar con hot reload de Vite sin reconstruir la imagen Docker:
+
+```powershell
+docker compose stop frontend
+Set-Location .\frontend
+Copy-Item .env.example .env
+npm install
+npm run dev
+```
+
+Vite iniciara normalmente en:
+
+```text
+http://localhost:5173
+```
+
+Antes de iniciar Vite manualmente se detiene el contenedor frontend para liberar el puerto `5173`.
+
+Cuando quieras volver a usar el frontend en Docker:
+
+```powershell
+Set-Location ..
+docker compose start frontend
 ```
 
 ## Variables de entorno
 
-Crea un archivo `.env` local a partir de la plantilla:
+Para Docker, las variables publicas necesarias se inyectan durante el build desde `compose.yml`.
+
+Para ejecutar Vite manualmente, crea un archivo `.env` local:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-La configuracion esperada para desarrollo local es:
+Configuracion esperada:
 
 ```text
 VITE_API_BASE_URL=http://localhost:8080
@@ -96,24 +171,7 @@ VITE_KEYCLOAK_REALM=camel-racing
 VITE_KEYCLOAK_CLIENT_ID=camel-racing-frontend
 ```
 
-No subas el archivo `.env` al repositorio si contiene configuracion local o secretos.
-
-## Instalacion y ejecucion
-
-Desde la carpeta `frontend`:
-
-```powershell
-npm install
-npm run dev
-```
-
-Vite mostrara la URL local:
-
-```text
-http://localhost:5173
-```
-
-Abre esa direccion en el navegador.
+No subas el archivo `.env` si contiene configuracion local o secretos.
 
 ## Modulos
 
@@ -148,6 +206,8 @@ Abre esa direccion en el navegador.
 | `/forbidden` | Acceso denegado |
 | `*` | Pagina no encontrada |
 
+Nginx usa un fallback hacia `index.html` para que React Router pueda resolver las rutas internas despues de una recarga directa.
+
 ## Autenticacion y autorizacion
 
 El frontend utiliza Keycloak para iniciar y cerrar sesion. El contexto de autenticacion mantiene el usuario autenticado, sus roles y las operaciones de login/logout.
@@ -157,10 +217,29 @@ Los componentes de interfaz aplican controles visuales segun el rol:
 | Rol | Comportamiento de interfaz |
 |---|---|
 | `ADMINISTRATOR` | Visualiza y administra todos los recursos disponibles |
-| `RACE_ORGANIZER` | Gestiona recursos asociados a sus propias carreras |
+| `RACE_ORGANIZER` | Gestiona recursos asociados a sus propias carreras y consulta competidores y equipos |
 | `VIEWER` | Visualiza informacion sin acciones de escritura |
 
 El frontend incluye guards de ruta y controles de interfaz, pero estos no reemplazan las verificaciones de seguridad del backend.
+
+## Datos demo
+
+La demostracion local puede cargarse desde la raiz del repositorio con el archivo `seed-dark-fantasy-demo.sql`.
+
+Antes de ejecutar el seed, asegúrate de que la base de datos sea completamente limpia. El script carga usuarios locales vinculados con Keycloak, roles, competidores, equipos, carreras, inscripciones y resultados. No debes iniciar sesion antes de ejecutar el seed si la base fue reiniciada, porque el seed crea las filas locales necesarias.
+
+```powershell
+Get-Content .\seed-dark-fantasy-demo.sql |
+    docker exec -i camel-racing-db psql -v ON_ERROR_STOP=1 -U camel_racing_user -d camel_racing_db
+```
+
+Luego realiza una recarga fuerte del navegador:
+
+```text
+Ctrl + Shift + R
+```
+
+El seed inserta datos SQL directamente, por lo que Audit Log inicia vacio. Realiza aprobaciones, rechazos, cambios de estado y resultados desde la interfaz para generar eventos auditables.
 
 ## Estructura principal
 
@@ -187,6 +266,8 @@ frontend/
 │   ├── styles/
 │   └── utils/
 ├── .env.example
+├── Dockerfile
+├── nginx.conf
 ├── package.json
 ├── vite.config.ts
 └── README.md
@@ -237,11 +318,13 @@ Build successful
 | Situacion | Posible causa | Accion recomendada |
 |---|---|---|
 | La pagina no carga datos | El backend no esta disponible | Verifica `http://localhost:8080/actuator/health` |
-| El login no funciona | Keycloak no ha terminado de iniciar o las variables no coinciden | Revisa `docker compose ps`, logs de Keycloak y `VITE_KEYCLOAK_*` |
-| Vite no inicia | Dependencias no instaladas | Ejecuta `npm install` |
+| El login no funciona | Keycloak no ha terminado de iniciar o las variables no coinciden | Revisa `docker compose ps`, logs de Keycloak y configuracion del frontend |
+| El frontend no abre en 5173 | El contenedor no inicio o el puerto esta ocupado | Ejecuta `docker compose ps` y `docker compose logs -f frontend` |
+| Vite no inicia localmente | Dependencias no instaladas | Ejecuta `npm install` |
 | Error de API o 401 | No hay sesion valida o el token expiro | Cierra sesion, vuelve a iniciar y verifica Keycloak |
 | Accion no visible | El usuario no tiene el rol o ownership necesario | Prueba con `admin` o revisa la propiedad de la carrera |
-| El puerto 5173 esta ocupado | Otro proceso usa el puerto | Deten el proceso o permite que Vite use otro puerto |
+| Recarga directa devuelve error | Configuracion Nginx ausente o desactualizada | Reconstruye el servicio frontend con `docker compose up -d --build frontend` |
+| Seed aborta | Existen datos en la base local | Usa una base limpia antes de ejecutarlo |
 
 ## Documentacion relacionada
 

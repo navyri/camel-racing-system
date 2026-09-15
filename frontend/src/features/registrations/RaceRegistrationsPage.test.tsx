@@ -876,6 +876,41 @@ describe('RaceRegistrationsPage', () => {
         ).not.toBeInTheDocument()
     })
 
+    it('hides cancellation actions while registration is closed', async () => {
+        const closedRace: RaceResponse = {
+            ...race,
+            status: 'CLOSED_FOR_REGISTRATION',
+        }
+
+        const approvedRegistration: RegistrationResponse = {
+            ...pendingRegistration,
+            status: 'APPROVED',
+            startingPosition: 1,
+        }
+
+        setupSuccessfulLoad([approvedRegistration], closedRace)
+
+        renderPage()
+
+        expect(
+            await screen.findByRole('heading', {
+                name: 'New registrations unavailable',
+            }),
+        ).toBeInTheDocument()
+
+        expect(
+            screen.queryByRole('button', {
+                name: 'Cancel',
+            }),
+        ).not.toBeInTheDocument()
+
+        expect(
+            screen.getByText('No actions available'),
+        ).toBeInTheDocument()
+
+        expect(mockedCancelRegistration).not.toHaveBeenCalled()
+    })
+
     it('validates required registration form values before submitting', async () => {
         setupSuccessfulLoad([])
 

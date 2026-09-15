@@ -168,6 +168,47 @@ class RaceControllerTest {
         }
 
         @Nested
+        @DisplayName("GET /api/races/upcoming")
+        class GetUpcomingRaces {
+
+                @Test
+                @DisplayName("viewer can list upcoming races")
+                void viewerCanListUpcomingRaces() throws Exception {
+                        RaceResponse race = response();
+
+                        when(raceService.getUpcomingRaces(5)).thenReturn(List.of(race));
+
+                        mockMvc.perform(get("/api/races/upcoming")
+                                        .param("limit", "5")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_VIEWER"))))
+                                        .andExpect(status().isOk())
+                                        .andExpect(jsonPath("$", hasSize(1)))
+                                        .andExpect(jsonPath("$[0].name", is("The Great Mixed Race")))
+                                        .andExpect(jsonPath("$[0].status", is("DRAFT")));
+                }
+
+                @Test
+                @DisplayName("viewer can use default upcoming race limit")
+                void viewerCanUseDefaultUpcomingRaceLimit() throws Exception {
+                        when(raceService.getUpcomingRaces(null)).thenReturn(List.of());
+
+                        mockMvc.perform(get("/api/races/upcoming")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_VIEWER"))))
+                                        .andExpect(status().isOk())
+                                        .andExpect(jsonPath("$", hasSize(0)));
+                }
+
+                @Test
+                @DisplayName("returns unauthorized without token")
+                void returnsUnauthorizedWithoutToken() throws Exception {
+                        mockMvc.perform(get("/api/races/upcoming"))
+                                        .andExpect(status().isUnauthorized());
+                }
+        }
+
+        @Nested
         @DisplayName("GET /api/races/{id}")
         class GetRaceById {
 

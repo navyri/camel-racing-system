@@ -6,7 +6,7 @@ import {
     defaultRacePage,
     defaultRacePageSize,
     defaultRaceSort,
-    getAvailableRaceStatusTransition,
+    getAvailableRaceStatusTransitions,
     isTerminalRaceStatus,
     raceSortFields,
     raceStatuses,
@@ -66,29 +66,41 @@ describe('race contract types', () => {
         expect(defaultRaceSort).toBe('scheduledAt,asc')
     })
 
-    it('exposes only the valid next transition for each active status', () => {
-        expect(getAvailableRaceStatusTransition('DRAFT')).toMatchObject({
-            nextStatus: 'OPEN_FOR_REGISTRATION',
-            actionLabel: 'Open registration',
-        })
+    it('exposes valid next transitions for each active status', () => {
+        expect(getAvailableRaceStatusTransitions('DRAFT')).toMatchObject([
+            {
+                nextStatus: 'OPEN_FOR_REGISTRATION',
+                actionLabel: 'Open registration',
+            },
+        ])
         expect(
-            getAvailableRaceStatusTransition('OPEN_FOR_REGISTRATION'),
-        ).toMatchObject({
-            nextStatus: 'CLOSED_FOR_REGISTRATION',
-            actionLabel: 'Close registration',
-        })
+            getAvailableRaceStatusTransitions('OPEN_FOR_REGISTRATION'),
+        ).toMatchObject([
+            {
+                nextStatus: 'CLOSED_FOR_REGISTRATION',
+                actionLabel: 'Close registration',
+            },
+        ])
         expect(
-            getAvailableRaceStatusTransition('CLOSED_FOR_REGISTRATION'),
-        ).toMatchObject({
-            nextStatus: 'IN_PROGRESS',
-            actionLabel: 'Start race',
-        })
-        expect(getAvailableRaceStatusTransition('IN_PROGRESS')).toMatchObject({
-            nextStatus: 'COMPLETED',
-            actionLabel: 'Complete race',
-        })
-        expect(getAvailableRaceStatusTransition('COMPLETED')).toBeNull()
-        expect(getAvailableRaceStatusTransition('CANCELLED')).toBeNull()
+            getAvailableRaceStatusTransitions('CLOSED_FOR_REGISTRATION'),
+        ).toMatchObject([
+            {
+                nextStatus: 'OPEN_FOR_REGISTRATION',
+                actionLabel: 'Reopen registration',
+            },
+            {
+                nextStatus: 'IN_PROGRESS',
+                actionLabel: 'Start race',
+            },
+        ])
+        expect(getAvailableRaceStatusTransitions('IN_PROGRESS')).toMatchObject([
+            {
+                nextStatus: 'COMPLETED',
+                actionLabel: 'Complete race',
+            },
+        ])
+        expect(getAvailableRaceStatusTransitions('COMPLETED')).toEqual([])
+        expect(getAvailableRaceStatusTransitions('CANCELLED')).toEqual([])
     })
 
     it('matches cancellation and terminal status rules', () => {

@@ -185,6 +185,7 @@ public class RaceRegistrationService {
         User currentUser = currentUserService.getOrSynchronizeCurrentUser();
 
         validateOrganizerPermission(registration.getRace(), currentUser);
+        validateRaceAllowsRegistrationCancellation(registration.getRace());
 
         if (registration.getStatus() == RegistrationStatus.CANCELLED) {
             return;
@@ -217,6 +218,13 @@ public class RaceRegistrationService {
 
         if (!LocalDateTime.now().isBefore(race.getRegistrationDeadline())) {
             throw new ConflictException("Registration deadline has passed");
+        }
+    }
+
+    private void validateRaceAllowsRegistrationCancellation(Race race) {
+        if (race.getStatus() != RaceStatus.OPEN_FOR_REGISTRATION) {
+            throw new ConflictException(
+                    "Registrations can only be cancelled while the race is open for registration");
         }
     }
 

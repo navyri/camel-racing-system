@@ -91,41 +91,41 @@ La capa de servicios concentra las reglas de negocio. Los controladores exponen 
 | `result` | Registro, actualizacion y ranking de resultados |
 | `standing` | Clasificacion de competidores y equipos |
 | `audit` | Trazabilidad de operaciones relevantes |
-| `user` | Usuarios locales sincronizados desde identidad autenticada |
+| `user` | Usuarios locales vinculados con la identidad autenticada |
 | `common` | Seguridad, excepciones, configuracion y utilidades compartidas |
 
 ## Seguridad
 
 El backend funciona como OAuth 2.0 Resource Server.
 
-- Recibe JWT emitidos por Keycloak.
-- Valida firma e issuer del token.
-- Convierte roles de Keycloak a autoridades con prefijo `ROLE_`.
-- Aplica autorizacion por ruta y por reglas de negocio.
-- Verifica ownership para que un `RACE_ORGANIZER` solo administre carreras propias.
-- Restringe la consulta de Audit Log a `ADMINISTRATOR`.
-- Mantiene la seguridad en backend aunque la interfaz oculte acciones no permitidas.
+- Recibe JWT emitidos por Keycloak
+- Valida firma e issuer del token
+- Convierte roles de Keycloak a autoridades con prefijo `ROLE_`
+- Aplica autorizacion por ruta y por reglas de negocio
+- Verifica ownership para que un `RACE_ORGANIZER` solo administre carreras propias
+- Restringe la consulta de Audit Log a `ADMINISTRATOR`
+- Mantiene la seguridad en backend aunque la interfaz oculte acciones no permitidas
 
 ### Roles
 
 | Rol | Permisos principales |
 |---|---|
 | `ADMINISTRATOR` | Gestiona todos los recursos y consulta Audit Log |
-| `RACE_ORGANIZER` | Gestiona carreras, inscripciones y resultados de su propiedad |
+| `RACE_ORGANIZER` | Gestiona carreras, inscripciones y resultados de su propiedad; consulta competidores y equipos |
 | `VIEWER` | Consulta recursos permitidos sin operaciones de escritura |
 
 ## Reglas de negocio principales
 
-- Una carrera puede ser `INDIVIDUAL`, `TEAM` o `MIXED`.
-- Una inscripcion representa exactamente un competidor o un equipo.
-- Un registro nuevo inicia como `PENDING`.
-- Solo los registros `APPROVED` consumen cupo y ocupan posicion de salida.
-- Un equipo debe estar activo y tener integrantes activos para registrarse.
-- Un competidor activo no puede tener conflictos entre participacion individual y participacion por equipo en la misma carrera.
-- Los resultados solo se registran para inscripciones aprobadas y carreras `IN_PROGRESS`.
-- Una carrera necesita un ganador oficial para pasar a `COMPLETED`.
-- Las estadisticas y standings se recalculan a partir de resultados.
-- Audit Log registra operaciones relevantes realizadas por servicios del backend.
+- Una carrera puede ser `INDIVIDUAL`, `TEAM` o `MIXED`
+- Una inscripcion representa exactamente un competidor o un equipo
+- Un registro nuevo inicia como `PENDING`
+- Solo los registros `APPROVED` consumen cupo y ocupan posicion de salida
+- Un equipo debe estar activo y tener integrantes activos para registrarse
+- Un competidor activo no puede tener conflictos entre participacion individual y participacion por equipo en la misma carrera
+- Los resultados solo se registran para inscripciones aprobadas y carreras `IN_PROGRESS`
+- Una carrera necesita un ganador oficial para pasar a `COMPLETED`
+- Las estadisticas y standings se recalculan a partir de resultados
+- Audit Log registra operaciones relevantes realizadas por servicios del backend
 
 ## Ejecucion local
 
@@ -174,10 +174,10 @@ http://localhost:8080/swagger-ui/index.html
 
 Para consumir endpoints protegidos desde Swagger:
 
-1. Abre Swagger UI.
-2. Presiona `Authorize`.
-3. Inicia sesion mediante Keycloak.
-4. Ejecuta las operaciones permitidas por el rol autenticado.
+1. Abre Swagger UI
+2. Presiona `Authorize`
+3. Inicia sesion mediante Keycloak
+4. Ejecuta las operaciones permitidas por el rol autenticado
 
 El cliente Swagger usa Authorization Code Flow con PKCE.
 
@@ -239,6 +239,8 @@ El backend utiliza PostgreSQL y Spring Data JPA. Las tablas principales son:
 
 ```text
 users
+roles
+user_roles
 competitors
 teams
 team_members
@@ -251,9 +253,10 @@ audit_logs
 Las relaciones relevantes son:
 
 ```text
+User -> Role
+User -> Race / RaceRegistration / RaceResult / AuditLog
 Race -> RaceRegistration -> RaceResult
 Team -> TeamMember -> Competitor
-User -> Race / RaceRegistration / RaceResult / AuditLog
 ```
 
 Consulta el modelo completo en el [README principal](../README.md#modelo-de-base-de-datos).
@@ -282,9 +285,33 @@ El seed de demostracion se encuentra en la raiz del repositorio:
 ../seed-dark-fantasy-demo.sql
 ```
 
-El script inserta datos directamente en PostgreSQL y requiere tablas de negocio vacias. Debido a esto, no genera eventos de Audit Log durante la carga.
+El script inserta datos directamente en PostgreSQL y debe ejecutarse contra una base completamente limpia. Esto incluye:
 
-Consulta instrucciones completas en el [README principal](../README.md#datos-de-demostracion).
+```text
+users
+roles
+user_roles
+competitors
+teams
+team_members
+races
+race_registrations
+race_results
+audit_logs
+```
+
+El seed crea tres usuarios locales vinculados a los sujetos reales de Keycloak y les asigna los roles `ADMINISTRATOR`, `RACE_ORGANIZER` y `VIEWER`. Tambien inserta nueve competidores, tres equipos, siete carreras, trece inscripciones y nueve resultados.
+
+Ejecuta el seed desde la raiz del repositorio:
+
+```powershell
+Get-Content .\seed-dark-fantasy-demo.sql |
+    docker exec -i camel-racing-db psql -v ON_ERROR_STOP=1 -U camel_racing_user -d camel_racing_db
+```
+
+El seed no genera eventos de Audit Log porque las inserciones SQL no atraviesan los servicios del backend. Para generar auditoria, realiza acciones desde la interfaz o API despues de cargar los datos.
+
+Consulta instrucciones completas en el [README principal](../README.md#datos-de-demostracion) y en [Keycloak](../keycloak/README.md#datos-demo-y-seed).
 
 ## Problemas frecuentes
 
@@ -295,7 +322,8 @@ Consulta instrucciones completas en el [README principal](../README.md#datos-de-
 | Error de autenticacion | Keycloak no esta disponible o JWT invalido | Verifica Keycloak y vuelve a iniciar sesion |
 | Error de base de datos | PostgreSQL no esta disponible | Revisa `docker compose ps` y logs del servicio |
 | Swagger no autoriza | El flujo OIDC no finaliza o Keycloak no esta listo | Espera el inicio de Keycloak y revisa configuracion del realm |
-| Error 403 para organizer | La carrera pertenece a otro organizador | Usa una carrera propia o inicia sesion como administrador |
+| Error 403 para organizer | La carrera pertenece a otro organizador o el rol no tiene permiso | Usa una carrera propia o inicia sesion como administrador |
+| Seed aborta por datos existentes | La base contiene usuarios, roles o datos de negocio | Usa una base limpia o ejecuta `docker compose down -v` si autorizas borrar el entorno local |
 
 ## Documentacion relacionada
 

@@ -49,6 +49,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -240,7 +241,7 @@ class RaceRegistrationServiceTest {
                 assertThatThrownBy(() -> registrationService.createRegistration(
                                 raceId,
                                 new RaceRegistrationRequest(competitorId, null, null)))
-                                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class)
+                                .isInstanceOf(AccessDeniedException.class)
                                 .hasMessage("Race organizer can only manage registrations for own races");
 
                 verify(registrationRepository, never()).countByRaceIdAndStatusIn(
@@ -1213,6 +1214,115 @@ class RaceRegistrationServiceTest {
         }
 
         @Test
+        @DisplayName("rejects cancellation when registration is closed")
+        void rejectsCancellationWhenRegistrationIsClosed() {
+                UUID registrationId = UUID.randomUUID();
+                UUID raceId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 10, RaceType.MIXED);
+                race.setStatus(RaceStatus.CLOSED_FOR_REGISTRATION);
+                RaceRegistration registration = approvedRegistration(
+                                registrationId,
+                                race,
+                                organizer);
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+
+                assertThatThrownBy(() -> registrationService.cancelRegistration(registrationId))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage(
+                                                "Registrations can only be cancelled while the race is open for registration");
+
+                assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.APPROVED);
+                assertThat(registration.getStartingPosition()).isEqualTo(1);
+
+                verify(registrationRepository, never()).save(any(RaceRegistration.class));
+                verify(auditLogService, never()).log(
+                                any(User.class),
+                                eq(AuditLogService.ACTION_REGISTRATION_CANCELLED),
+                                eq("REGISTRATION"),
+                                eq(registrationId.toString()),
+                                eq("Registration cancelled"),
+                                any(String.class),
+                                any(String.class));
+        }
+
+        @Test
+        @DisplayName("rejects cancellation after race has started")
+        void rejectsCancellationAfterRaceHasStarted() {
+                UUID registrationId = UUID.randomUUID();
+                UUID raceId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 10, RaceType.MIXED);
+                race.setStatus(RaceStatus.IN_PROGRESS);
+                RaceRegistration registration = approvedRegistration(registrationId, race, organizer);
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+
+                assertThatThrownBy(() -> registrationService.cancelRegistration(registrationId))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage(
+                                                "Registrations can only be cancelled while the race is open for registration");
+
+                assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.APPROVED);
+
+                verify(registrationRepository, never()).save(any(RaceRegistration.class));
+                verify(auditLogService, never()).log(
+                                any(User.class),
+                                eq(AuditLogService.ACTION_REGISTRATION_CANCELLED),
+                                eq("REGISTRATION"),
+                                eq(registrationId.toString()),
+                                eq("Registration cancelled"),
+                                any(String.class),
+                                any(String.class));
+        }
+
+        @Test
+        @DisplayName("rejects cancellation after race has completed")
+        void rejectsCancellationAfterRaceHasCompleted() {
+                UUID registrationId = UUID.randomUUID();
+                UUID raceId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer, 10, RaceType.MIXED);
+                race.setStatus(RaceStatus.COMPLETED);
+                RaceRegistration registration = approvedRegistration(registrationId, race, organizer);
+
+                authenticateOrganizer();
+
+                when(registrationRepository.findDetailedById(registrationId))
+                                .thenReturn(Optional.of(registration));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+
+                assertThatThrownBy(() -> registrationService.cancelRegistration(registrationId))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage(
+                                                "Registrations can only be cancelled while the race is open for registration");
+
+                assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.APPROVED);
+
+                verify(registrationRepository, never()).save(any(RaceRegistration.class));
+                verify(auditLogService, never()).log(
+                                any(User.class),
+                                eq(AuditLogService.ACTION_REGISTRATION_CANCELLED),
+                                eq("REGISTRATION"),
+                                eq(registrationId.toString()),
+                                eq("Registration cancelled"),
+                                any(String.class),
+                                any(String.class));
+        }
+
+        @Test
         @DisplayName("cancels cancelled registration idempotently without saving")
         void cancelsCancelledRegistrationIdempotentlyWithoutSaving() {
                 UUID registrationId = UUID.randomUUID();
@@ -1313,6 +1423,22 @@ class RaceRegistrationServiceTest {
                                 .registeredAt(LocalDateTime.now().minusMinutes(10))
                                 .status(RegistrationStatus.PENDING)
                                 .startingPosition(null)
+                                .validationNotes(null)
+                                .registeredBy(organizer)
+                                .build();
+        }
+
+        private RaceRegistration approvedRegistration(
+                        UUID registrationId,
+                        Race race,
+                        User organizer) {
+                return RaceRegistration.builder()
+                                .id(registrationId)
+                                .race(race)
+                                .competitor(competitor(UUID.randomUUID(), CompetitorStatus.ACTIVE))
+                                .registeredAt(LocalDateTime.now().minusMinutes(10))
+                                .status(RegistrationStatus.APPROVED)
+                                .startingPosition(1)
                                 .validationNotes(null)
                                 .registeredBy(organizer)
                                 .build();
