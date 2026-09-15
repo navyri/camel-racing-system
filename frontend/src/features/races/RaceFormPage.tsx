@@ -13,7 +13,7 @@ import { RaceForm } from './RaceForm'
 import {
     createEmptyRaceFormValues,
     createRaceFormValues,
-    isTerminalRaceStatus,
+    isRaceLockedForUpdate,
     toRaceRequest,
     validateRaceForm,
     type RaceFormErrors,
@@ -87,7 +87,7 @@ export function RaceFormPage() {
     const [loading, setLoading] = useState(isEditMode)
     const [submitting, setSubmitting] = useState(false)
     const [loadError, setLoadError] = useState<string | null>(null)
-    const [terminalRace, setTerminalRace] = useState(false)
+    const [lockedRace, setLockedRace] = useState(false)
     const [requestVersion, setRequestVersion] = useState(0)
 
     useEffect(() => {
@@ -115,7 +115,7 @@ export function RaceFormPage() {
                 }
 
                 setValues(createRaceFormValues(race))
-                setTerminalRace(isTerminalRaceStatus(race.status))
+                setLockedRace(isRaceLockedForUpdate(race.status))
                 setLoadError(null)
             })
             .catch((error: unknown) => {
@@ -159,8 +159,8 @@ export function RaceFormPage() {
             return
         }
 
-        if (isEditMode && terminalRace) {
-            setFormError('Terminal races cannot be updated.')
+        if (isEditMode && lockedRace) {
+            setFormError('In-progress or terminal races cannot be updated.')
             return
         }
 
@@ -218,15 +218,15 @@ export function RaceFormPage() {
         )
     }
 
-    if (isEditMode && terminalRace) {
+    if (isEditMode && lockedRace) {
         return (
             <section className="race-page">
                 <div className="race-archive-heading">
                     <p className="race-kicker">Race management</p>
                     <h1>Race cannot be edited</h1>
                     <p>
-                        Completed and cancelled races are terminal records and cannot
-                        be updated.
+                        In-progress, completed and cancelled races are locked
+                        records and cannot be updated.
                     </p>
                 </div>
 

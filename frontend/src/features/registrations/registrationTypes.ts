@@ -1,3 +1,5 @@
+import type { RaceStatus } from '../races/raceTypes'
+
 export const registrationStatuses = [
     'PENDING',
     'APPROVED',
@@ -143,9 +145,16 @@ export function canRejectRegistration(
 }
 
 export function canCancelRegistration(
-    status: RegistrationStatus,
+    registrationStatus: RegistrationStatus,
+    raceStatus: RaceStatus,
 ): boolean {
-    return status === 'PENDING' || status === 'APPROVED'
+    return (
+        raceStatus === 'OPEN_FOR_REGISTRATION' &&
+        (
+            registrationStatus === 'PENDING' ||
+            registrationStatus === 'APPROVED'
+        )
+    )
 }
 
 export function canCreateIndividualRegistration(

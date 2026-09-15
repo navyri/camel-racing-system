@@ -22,13 +22,18 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuditLogService {
 
     public static final String ACTION_USER_CREATED = "USER_CREATED";
+    public static final String ACTION_COMPETITOR_CREATED = "COMPETITOR_CREATED";
     public static final String ACTION_COMPETITOR_UPDATED = "COMPETITOR_UPDATED";
     public static final String ACTION_COMPETITOR_STATUS_CHANGED = "COMPETITOR_STATUS_CHANGED";
     public static final String ACTION_COMPETITOR_RETIRED = "COMPETITOR_RETIRED";
+    public static final String ACTION_RACE_CREATED = "RACE_CREATED";
+    public static final String ACTION_RACE_STATUS_CHANGED = "RACE_STATUS_CHANGED";
     public static final String ACTION_RACE_CANCELLED = "RACE_CANCELLED";
+    public static final String ACTION_RACE_COMPLETED = "RACE_COMPLETED";
     public static final String ACTION_REGISTRATION_APPROVED = "REGISTRATION_APPROVED";
     public static final String ACTION_REGISTRATION_REJECTED = "REGISTRATION_REJECTED";
     public static final String ACTION_REGISTRATION_CANCELLED = "REGISTRATION_CANCELLED";
+    public static final String ACTION_RESULT_CREATED = "RESULT_CREATED";
     public static final String ACTION_RESULT_UPDATED = "RESULT_UPDATED";
 
     private static final int DEFAULT_PAGE = 0;
@@ -45,8 +50,7 @@ public class AuditLogService {
             String entityId,
             String description,
             String previousValue,
-            String newValue
-    ) {
+            String newValue) {
         AuditLog auditLog = AuditLog.builder()
                 .user(user)
                 .action(action)
@@ -64,8 +68,7 @@ public class AuditLogService {
     @Transactional(readOnly = true)
     public PageResponse<AuditLogResponse> getAuditLogs(
             Integer page,
-            Integer size
-    ) {
+            Integer size) {
         Pageable pageable = buildPageable(page, size);
 
         Page<AuditLogResponse> auditLogs = auditLogRepository

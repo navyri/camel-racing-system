@@ -454,6 +454,13 @@ export function RaceRegistrationsPage() {
             return
         }
 
+        if (type === 'cancel' && (!race || !canCancelRegistration(
+            registration.status,
+            race.status,
+        ))) {
+            return
+        }
+
         actionTriggerRef.current =
             document.activeElement instanceof HTMLButtonElement
                 ? document.activeElement
@@ -595,7 +602,12 @@ export function RaceRegistrationsPage() {
         if (
             !pendingAction ||
             pendingAction.type !== 'cancel' ||
+            !race ||
             !canManageRegistrations ||
+            !canCancelRegistration(
+                pendingAction.registration.status,
+                race.status,
+            ) ||
             actionSubmitting
         ) {
             return
@@ -781,6 +793,16 @@ export function RaceRegistrationsPage() {
                             {registrations.map((registration) => {
                                 const participantLabel =
                                     getRegistrationParticipantLabel(registration)
+                                const canApprove = canApproveRegistration(
+                                    registration.status,
+                                )
+                                const canReject = canRejectRegistration(
+                                    registration.status,
+                                )
+                                const canCancel = canCancelRegistration(
+                                    registration.status,
+                                    race.status,
+                                )
 
                                 return (
                                     <tr key={registration.id}>
@@ -818,9 +840,7 @@ export function RaceRegistrationsPage() {
                                         <td>
                                             {canManageRegistrations ? (
                                                 <div className="registration-row-actions">
-                                                    {canApproveRegistration(
-                                                        registration.status,
-                                                    ) ? (
+                                                    {canApprove ? (
                                                         <button
                                                             type="button"
                                                             className="registration-approve-button"
@@ -835,9 +855,7 @@ export function RaceRegistrationsPage() {
                                                         </button>
                                                     ) : null}
 
-                                                    {canRejectRegistration(
-                                                        registration.status,
-                                                    ) ? (
+                                                    {canReject ? (
                                                         <button
                                                             type="button"
                                                             className="registration-warning-button"
@@ -852,9 +870,7 @@ export function RaceRegistrationsPage() {
                                                         </button>
                                                     ) : null}
 
-                                                    {canCancelRegistration(
-                                                        registration.status,
-                                                    ) ? (
+                                                    {canCancel ? (
                                                         <button
                                                             type="button"
                                                             className="registration-cancel-button"
@@ -869,15 +885,9 @@ export function RaceRegistrationsPage() {
                                                         </button>
                                                     ) : null}
 
-                                                    {!canApproveRegistration(
-                                                        registration.status,
-                                                    ) &&
-                                                        !canRejectRegistration(
-                                                            registration.status,
-                                                        ) &&
-                                                        !canCancelRegistration(
-                                                            registration.status,
-                                                        ) ? (
+                                                    {!canApprove &&
+                                                        !canReject &&
+                                                        !canCancel ? (
                                                         <span className="registration-no-actions">
                                                             No actions available
                                                         </span>

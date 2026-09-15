@@ -6,6 +6,7 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -146,24 +147,153 @@ class CompetitorControllerTest {
                 }
 
                 @Test
-                @DisplayName("returns bad request when weight is invalid")
-                void returnsBadRequestWhenWeightIsInvalid() throws Exception {
+                @DisplayName("returns bad request when weight is zero")
+                void returnsBadRequestWhenWeightIsZero() throws Exception {
                         mockMvc.perform(post("/api/competitors")
                                         .with(jwt().authorities(
                                                         new SimpleGrantedAuthority("ROLE_ADMINISTRATOR")))
                                         .contentType("application/json")
                                         .content("""
                                                         {
-                                                                "name": "Byte",
-                                                                "nickname": "ByteTheCamel",
+                                                            "name": "Byte",
+                                                            "nickname": "ByteTheCamel",
+                                                            "competitorType": "CAMEL",
+                                                            "dateOfBirth": "2016-05-20",
+                                                            "weightKg": 0,
+                                                            "heightCm": 220,
+                                                            "origin": "Colombia"
+                                                        }
+                                                        """))
+                                        .andExpect(status().isBadRequest())
+                                        .andExpect(jsonPath("$.validationErrors.weightKg", is(
+                                                        "Weight must be at least 10 kg")));
+
+                        verifyNoInteractions(competitorService);
+                }
+
+                @Test
+                @DisplayName("returns bad request when approximate age exceeds maximum")
+                void returnsBadRequestWhenApproximateAgeExceedsMaximum() throws Exception {
+                        mockMvc.perform(post("/api/competitors")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_ADMINISTRATOR")))
+                                        .contentType("application/json")
+                                        .content("""
+                                                        {
+                                                                "name": "Tiny Docker",
+                                                                "nickname": "TinyDocker",
+                                                                "competitorType": "DWARF",
+                                                                "approximateAge": 1000000,
+                                                                "weightKg": 50,
+                                                                "heightCm": 120,
+                                                                "origin": "Colombia"
+                                                        }
+                                                        """))
+                                        .andExpect(status().isBadRequest())
+                                        .andExpect(jsonPath("$.validationErrors.approximateAge", is(
+                                                        "Approximate age must not exceed 150")));
+
+                        verifyNoInteractions(competitorService);
+                }
+
+                @Test
+                @DisplayName("returns bad request when weight is below minimum")
+                void returnsBadRequestWhenWeightIsBelowMinimum() throws Exception {
+                        mockMvc.perform(post("/api/competitors")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_ADMINISTRATOR")))
+                                        .contentType("application/json")
+                                        .content("""
+                                                        {
+                                                                "name": "Tiny Docker",
+                                                                "nickname": "TinyDocker",
+                                                                "competitorType": "DWARF",
+                                                                "approximateAge": 21,
+                                                                "weightKg": 1,
+                                                                "heightCm": 120,
+                                                                "origin": "Colombia"
+                                                        }
+                                                        """))
+                                        .andExpect(status().isBadRequest())
+                                        .andExpect(jsonPath("$.validationErrors.weightKg", is(
+                                                        "Weight must be at least 10 kg")));
+
+                        verifyNoInteractions(competitorService);
+                }
+
+                @Test
+                @DisplayName("returns bad request when weight exceeds maximum")
+                void returnsBadRequestWhenWeightExceedsMaximum() throws Exception {
+                        mockMvc.perform(post("/api/competitors")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_ADMINISTRATOR")))
+                                        .contentType("application/json")
+                                        .content("""
+                                                        {
+                                                                "name": "Heavy Camel",
+                                                                "nickname": "HeavyCamel",
                                                                 "competitorType": "CAMEL",
-                                                                "dateOfBirth": "2016-05-20",
-                                                                "weightKg": 0,
+                                                                "approximateAge": 10,
+                                                                "weightKg": 1500.01,
                                                                 "heightCm": 220,
                                                                 "origin": "Colombia"
                                                         }
                                                         """))
-                                        .andExpect(status().isBadRequest());
+                                        .andExpect(status().isBadRequest())
+                                        .andExpect(jsonPath("$.validationErrors.weightKg", is(
+                                                        "Weight must not exceed 1500 kg")));
+
+                        verifyNoInteractions(competitorService);
+                }
+
+                @Test
+                @DisplayName("returns bad request when height is below minimum")
+                void returnsBadRequestWhenHeightIsBelowMinimum() throws Exception {
+                        mockMvc.perform(post("/api/competitors")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_ADMINISTRATOR")))
+                                        .contentType("application/json")
+                                        .content("""
+                                                        {
+                                                                "name": "Tiny Docker",
+                                                                "nickname": "TinyDocker",
+                                                                "competitorType": "DWARF",
+                                                                "approximateAge": 21,
+                                                                "weightKg": 50,
+                                                                "heightCm": 29.99,
+                                                                "origin": "Colombia"
+                                                        }
+                                                        """))
+                                        .andExpect(status().isBadRequest())
+                                        .andExpect(jsonPath("$.validationErrors.heightCm", is(
+                                                        "Height must be at least 30 cm")));
+
+                        verifyNoInteractions(competitorService);
+                }
+
+                @Test
+                @DisplayName("returns bad request when height exceeds maximum")
+                void returnsBadRequestWhenHeightExceedsMaximum() throws Exception {
+                        mockMvc.perform(post("/api/competitors")
+                                        .with(jwt().authorities(
+                                                        new SimpleGrantedAuthority("ROLE_ADMINISTRATOR")))
+                                        .contentType("application/json")
+                                        .content("""
+                                                        {
+                                                                "name": "Tall Camel",
+                                                                "nickname": "TallCamel",
+                                                                "competitorType": "CAMEL",
+                                                                "approximateAge": 10,
+                                                                "weightKg": 400,
+                                                                "heightCm": 400.01,
+                                                                "origin": "Colombia"
+                                                        }
+                                                        """))
+                                        .andExpect(status().isBadRequest())
+                                        .andExpect(jsonPath("$.validationErrors.heightCm", is(
+                                                        "Height must not exceed 400 cm")));
+
+                        verifyNoInteractions(competitorService);
                 }
 
                 @Test

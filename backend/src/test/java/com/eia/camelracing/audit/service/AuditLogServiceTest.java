@@ -34,160 +34,160 @@ import org.springframework.data.domain.PageRequest;
 @DisplayName("Audit log service")
 class AuditLogServiceTest {
 
-    @Mock
-    private AuditLogRepository auditLogRepository;
+        @Mock
+        private AuditLogRepository auditLogRepository;
 
-    @InjectMocks
-    private AuditLogService auditLogService;
+        @InjectMocks
+        private AuditLogService auditLogService;
 
-    @Nested
-    @DisplayName("log")
-    class Log {
+        @Nested
+        @DisplayName("log")
+        class Log {
 
-        @Test
-        @DisplayName("persists audit log with received values")
-        void persistsAuditLogWithReceivedValues() {
-            User user = user("administrator");
+                @Test
+                @DisplayName("persists audit log with received values")
+                void persistsAuditLogWithReceivedValues() {
+                        User user = user("administrator");
 
-            auditLogService.log(
-                    user,
-                    AuditLogService.ACTION_RACE_CANCELLED,
-                    "RACE",
-                    "race-id",
-                    "Race cancelled",
-                    "status=OPEN_FOR_REGISTRATION",
-                    "status=CANCELLED");
+                        auditLogService.log(
+                                        user,
+                                        AuditLogService.ACTION_RACE_CANCELLED,
+                                        "RACE",
+                                        "race-id",
+                                        "Race cancelled",
+                                        "status=OPEN_FOR_REGISTRATION",
+                                        "status=CANCELLED");
 
-            ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+                        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
 
-            verify(auditLogRepository).save(captor.capture());
+                        verify(auditLogRepository).save(captor.capture());
 
-            AuditLog savedAuditLog = captor.getValue();
+                        AuditLog savedAuditLog = captor.getValue();
 
-            assertThat(savedAuditLog.getUser()).isEqualTo(user);
-            assertThat(savedAuditLog.getAction()).isEqualTo(
-                    AuditLogService.ACTION_RACE_CANCELLED);
-            assertThat(savedAuditLog.getEntityType()).isEqualTo("RACE");
-            assertThat(savedAuditLog.getEntityId()).isEqualTo("race-id");
-            assertThat(savedAuditLog.getDescription()).isEqualTo("Race cancelled");
-            assertThat(savedAuditLog.getPreviousValue()).isEqualTo(
-                    "status=OPEN_FOR_REGISTRATION");
-            assertThat(savedAuditLog.getNewValue()).isEqualTo("status=CANCELLED");
-            assertThat(savedAuditLog.getCreatedAt()).isNotNull();
+                        assertThat(savedAuditLog.getUser()).isEqualTo(user);
+                        assertThat(savedAuditLog.getAction()).isEqualTo(
+                                        AuditLogService.ACTION_RACE_CANCELLED);
+                        assertThat(savedAuditLog.getEntityType()).isEqualTo("RACE");
+                        assertThat(savedAuditLog.getEntityId()).isEqualTo("race-id");
+                        assertThat(savedAuditLog.getDescription()).isEqualTo("Race cancelled");
+                        assertThat(savedAuditLog.getPreviousValue()).isEqualTo(
+                                        "status=OPEN_FOR_REGISTRATION");
+                        assertThat(savedAuditLog.getNewValue()).isEqualTo("status=CANCELLED");
+                        assertThat(savedAuditLog.getCreatedAt()).isNotNull();
+                }
+
+                @Test
+                @DisplayName("persists null optional values")
+                void persistsNullOptionalValues() {
+                        User user = user("administrator");
+
+                        auditLogService.log(
+                                        user,
+                                        AuditLogService.ACTION_USER_CREATED,
+                                        "USER",
+                                        "user-id",
+                                        "Local user created from authenticated JWT",
+                                        null,
+                                        null);
+
+                        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+
+                        verify(auditLogRepository).save(captor.capture());
+
+                        AuditLog savedAuditLog = captor.getValue();
+
+                        assertThat(savedAuditLog.getPreviousValue()).isNull();
+                        assertThat(savedAuditLog.getNewValue()).isNull();
+                }
         }
 
-        @Test
-        @DisplayName("persists null optional values")
-        void persistsNullOptionalValues() {
-            User user = user("administrator");
+        @Nested
+        @DisplayName("get audit logs")
+        class GetAuditLogs {
 
-            auditLogService.log(
-                    user,
-                    AuditLogService.ACTION_USER_CREATED,
-                    "USER",
-                    "user-id",
-                    "Local user created from authenticated JWT",
-                    null,
-                    null);
+                @Test
+                @DisplayName("uses default pagination and maps audit logs")
+                void usesDefaultPaginationAndMapsAuditLogs() {
+                        User user = user("administrator");
+                        AuditLog auditLog = AuditLog.builder()
+                                        .id(UUID.randomUUID())
+                                        .user(user)
+                                        .action(AuditLogService.ACTION_RACE_CANCELLED)
+                                        .entityType("RACE")
+                                        .entityId("race-id")
+                                        .description("Race cancelled")
+                                        .previousValue("status=OPEN_FOR_REGISTRATION")
+                                        .newValue("status=CANCELLED")
+                                        .createdAt(LocalDateTime.now())
+                                        .build();
 
-            ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+                        when(auditLogRepository.findAllByOrderByCreatedAtDesc(
+                                        PageRequest.of(0, 10))).thenReturn(new PageImpl<>(
+                                                        List.of(auditLog),
+                                                        PageRequest.of(0, 10),
+                                                        1));
 
-            verify(auditLogRepository).save(captor.capture());
+                        PageResponse<AuditLogResponse> response = auditLogService.getAuditLogs(null, null);
 
-            AuditLog savedAuditLog = captor.getValue();
+                        assertThat(response.content()).hasSize(1);
+                        assertThat(response.page()).isZero();
+                        assertThat(response.size()).isEqualTo(10);
+                        assertThat(response.totalElements()).isEqualTo(1);
+                        assertThat(response.content().getFirst().username()).isEqualTo("administrator");
 
-            assertThat(savedAuditLog.getPreviousValue()).isNull();
-            assertThat(savedAuditLog.getNewValue()).isNull();
-        }
-    }
+                        verify(auditLogRepository).findAllByOrderByCreatedAtDesc(
+                                        PageRequest.of(0, 10));
+                }
 
-    @Nested
-    @DisplayName("get audit logs")
-    class GetAuditLogs {
+                @Test
+                @DisplayName("uses requested pagination")
+                void usesRequestedPagination() {
+                        when(auditLogRepository.findAllByOrderByCreatedAtDesc(
+                                        PageRequest.of(1, 5))).thenReturn(new PageImpl<>(
+                                                        List.of(),
+                                                        PageRequest.of(1, 5),
+                                                        0));
 
-        @Test
-        @DisplayName("uses default pagination and maps audit logs")
-        void usesDefaultPaginationAndMapsAuditLogs() {
-            User user = user("administrator");
-            AuditLog auditLog = AuditLog.builder()
-                    .id(UUID.randomUUID())
-                    .user(user)
-                    .action(AuditLogService.ACTION_RACE_CANCELLED)
-                    .entityType("RACE")
-                    .entityId("race-id")
-                    .description("Race cancelled")
-                    .previousValue("status=OPEN_FOR_REGISTRATION")
-                    .newValue("status=CANCELLED")
-                    .createdAt(LocalDateTime.now())
-                    .build();
+                        PageResponse<AuditLogResponse> response = auditLogService.getAuditLogs(1, 5);
 
-            when(auditLogRepository.findAllByOrderByCreatedAtDesc(
-                    PageRequest.of(0, 10))).thenReturn(new PageImpl<>(
-                            List.of(auditLog),
-                            PageRequest.of(0, 10),
-                            1));
+                        assertThat(response.page()).isEqualTo(1);
+                        assertThat(response.size()).isEqualTo(5);
 
-            PageResponse<AuditLogResponse> response = auditLogService.getAuditLogs(null, null);
+                        verify(auditLogRepository).findAllByOrderByCreatedAtDesc(
+                                        PageRequest.of(1, 5));
+                }
 
-            assertThat(response.content()).hasSize(1);
-            assertThat(response.page()).isZero();
-            assertThat(response.size()).isEqualTo(10);
-            assertThat(response.totalElements()).isEqualTo(1);
-            assertThat(response.content().getFirst().username()).isEqualTo("administrator");
+                @Test
+                @DisplayName("rejects negative page")
+                void rejectsNegativePage() {
+                        assertThatThrownBy(() -> auditLogService.getAuditLogs(-1, 10))
+                                        .isInstanceOf(IllegalArgumentException.class)
+                                        .hasMessage("Page must be zero or greater");
+                }
 
-            verify(auditLogRepository).findAllByOrderByCreatedAtDesc(
-                    PageRequest.of(0, 10));
-        }
+                @Test
+                @DisplayName("rejects invalid size")
+                void rejectsInvalidSize() {
+                        assertThatThrownBy(() -> auditLogService.getAuditLogs(0, 0))
+                                        .isInstanceOf(IllegalArgumentException.class)
+                                        .hasMessage("Size must be between 1 and 100");
 
-        @Test
-        @DisplayName("uses requested pagination")
-        void usesRequestedPagination() {
-            when(auditLogRepository.findAllByOrderByCreatedAtDesc(
-                    PageRequest.of(1, 5))).thenReturn(new PageImpl<>(
-                            List.of(),
-                            PageRequest.of(1, 5),
-                            0));
-
-            PageResponse<AuditLogResponse> response = auditLogService.getAuditLogs(1, 5);
-
-            assertThat(response.page()).isEqualTo(1);
-            assertThat(response.size()).isEqualTo(5);
-
-            verify(auditLogRepository).findAllByOrderByCreatedAtDesc(
-                    PageRequest.of(1, 5));
+                        assertThatThrownBy(() -> auditLogService.getAuditLogs(0, 101))
+                                        .isInstanceOf(IllegalArgumentException.class)
+                                        .hasMessage("Size must be between 1 and 100");
+                }
         }
 
-        @Test
-        @DisplayName("rejects negative page")
-        void rejectsNegativePage() {
-            assertThatThrownBy(() -> auditLogService.getAuditLogs(-1, 10))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Page must be zero or greater");
+        private User user(String username) {
+                return User.builder()
+                                .id(UUID.randomUUID())
+                                .keycloakSubject("issuer|" + username)
+                                .username(username)
+                                .email(username + "@camel-racing.test")
+                                .firstName("Audit")
+                                .lastName("User")
+                                .enabled(true)
+                                .createdAt(LocalDateTime.now())
+                                .build();
         }
-
-        @Test
-        @DisplayName("rejects invalid size")
-        void rejectsInvalidSize() {
-            assertThatThrownBy(() -> auditLogService.getAuditLogs(0, 0))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Size must be between 1 and 100");
-
-            assertThatThrownBy(() -> auditLogService.getAuditLogs(0, 101))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Size must be between 1 and 100");
-        }
-    }
-
-    private User user(String username) {
-        return User.builder()
-                .id(UUID.randomUUID())
-                .keycloakSubject("issuer|" + username)
-                .username(username)
-                .email(username + "@camel-racing.test")
-                .firstName("Audit")
-                .lastName("User")
-                .enabled(true)
-                .createdAt(LocalDateTime.now())
-                .build();
-    }
 }

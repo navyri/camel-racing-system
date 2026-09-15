@@ -612,23 +612,79 @@ a:hover {
 
 .notice-panel {
     position: relative;
+    margin: 1.25rem 0;
+    padding: 1rem 1.1rem;
+    border: 3px double var(--wood-dark);
+    border-left: 6px solid var(--old-gold);
+    border-radius: var(--radius-card);
+    color: var(--ink-brown);
+    background:
+        linear-gradient(135deg, rgb(201 154 67 / 22%), transparent 52%),
+        linear-gradient(90deg, rgb(112 68 45 / 10%), transparent 42%),
+        var(--parchment-light);
+    box-shadow: var(--shadow-rigid-small);
+}
+
+.notice-panel::before {
+    display: inline-block;
+    margin-bottom: 0.7rem;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid var(--wood-dark);
+    border-radius: var(--radius-label);
+    color: var(--ink-night);
+    content: 'STATUS';
+    font-family: 'IBM Plex Mono', Consolas, monospace;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    background: var(--sand-gold);
+    box-shadow: 2px 2px 0 var(--wood-dark);
+}
+
+.notice-panel h2 {
+    margin: 0 0 0.5rem;
+    color: var(--wood-dark);
+    font-family: 'Cinzel', Georgia, serif;
+    font-size: clamp(1.1rem, 3vw, 1.35rem);
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    line-height: 1.25;
+}
+
+.notice-panel h2::after {
+    display: block;
+    width: 3rem;
+    height: 0.18rem;
+    margin-top: 0.55rem;
+    content: '';
+    background: var(--old-gold);
+}
+
+.notice-panel p {
+    max-width: 48rem;
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 1rem;
+    line-height: 1.5;
 }
 
 .notice-loading::before {
     display: inline-block;
     margin-right: 0.65rem;
-    color: var(--oasis-green);
+    color: var(--old-gold);
     content: '...';
     font-weight: 700;
     letter-spacing: 0.18em;
 }
 
 .notice-empty {
-    border-color: var(--oasis-green);
+    border-color: var(--wood-dark);
 }
 
 .notice-empty h2 {
-    color: var(--oasis-green);
+    color: var(--wood-dark);
 }
 
 .status-page {
@@ -998,13 +1054,18 @@ a:hover {
 
 .race-table-panel,
 .competitor-table-panel,
+.team-table-panel,
 .table-wrapper {
     overflow-x: auto;
     border: 3px double var(--border-strong);
     border-radius: var(--radius-card);
     color: var(--ink-brown);
-    background: var(--parchment-light);
-    box-shadow: var(--shadow-rigid-small);
+    background:
+        linear-gradient(180deg, rgb(255 240 201 / 55%), transparent 7rem),
+        var(--parchment-light);
+    box-shadow:
+        var(--shadow-rigid-small),
+        inset 0 1px 0 rgb(255 240 201 / 74%);
     scrollbar-color: var(--sand-gold) var(--wood-dark);
     scrollbar-width: auto;
 }
@@ -2377,23 +2438,59 @@ tbody tr:last-child td {
 
 .team-refresh-message,
 .team-read-only-notice {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    margin: 0 0 1rem;
-    padding: 0.7rem 0.85rem;
-    border-left: 5px solid var(--oasis-green);
-    border-radius: var(--radius-control);
-    color: var(--wood-dark);
+    position: relative;
+    display: block;
+    margin: 1.25rem 0 1.5rem;
+    padding: 1rem 1.1rem;
+    border: 3px double var(--wood-dark);
+    border-left: 6px solid var(--old-gold);
+    border-radius: var(--radius-card);
+    color: var(--ink-brown);
     font-family: 'IBM Plex Mono', Consolas, monospace;
     font-size: 0.9rem;
-    background: var(--oasis-mist);
+    line-height: 1.5;
+    background:
+        linear-gradient(135deg, rgb(201 154 67 / 22%), transparent 52%),
+        linear-gradient(90deg, rgb(112 68 45 / 10%), transparent 42%),
+        var(--parchment-light);
+    box-shadow: var(--shadow-rigid-small);
+}
+
+.team-refresh-message::before,
+.team-read-only-notice::before {
+    display: block;
+    width: max-content;
+    margin-bottom: 0.65rem;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid var(--wood-dark);
+    border-radius: var(--radius-label);
+    color: var(--ink-night);
+    content: 'ACCESS';
+    font-family: 'IBM Plex Mono', Consolas, monospace;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    background: var(--sand-gold);
+    box-shadow: 2px 2px 0 var(--wood-dark);
 }
 
 .team-refresh-message {
-    border: 2px solid var(--oasis-green);
-    border-left-width: 5px;
+    margin-bottom: 1rem;
+    border-color: var(--oasis-green);
+    border-left-color: var(--oasis-green);
+    background:
+        linear-gradient(135deg, rgb(45 106 92 / 14%), transparent 48%),
+        var(--parchment-light);
+}
+
+.team-refresh-message::before {
+    border-color: var(--oasis-green);
+    color: var(--parchment-light);
+    content: 'REFRESH';
+    background: var(--oasis-green);
+    box-shadow: 2px 2px 0 var(--old-gold);
 }
 
 .team-refresh-message p,
@@ -2402,22 +2499,12 @@ tbody tr:last-child td {
 }
 
 .team-read-only-notice {
-    display: block;
-    margin-top: 1rem;
-    border: 2px solid var(--wood-dark);
-    border-left-width: 5px;
-    background: var(--parchment-muted);
+    border-color: var(--wood-dark);
+    border-left-color: var(--oasis-green);
 }
 
 .team-table-panel {
-    overflow-x: auto;
-    border: 3px double var(--border-strong);
-    border-radius: var(--radius-card);
-    color: var(--ink-brown);
-    background: var(--parchment-light);
-    box-shadow: var(--shadow-rigid-small);
-    scrollbar-color: var(--sand-gold) var(--wood-dark);
-    scrollbar-width: auto;
+    margin-top: 1.25rem;
 }
 
 .team-table-panel table {
@@ -2702,6 +2789,23 @@ tbody tr:last-child td {
     margin-top: 1.5rem;
 }
 
+.team-members-section>.team-table-panel,
+.result-page>.race-table-panel,
+.registration-page>.race-table-panel {
+    margin-top: 1.5rem;
+}
+
+.team-members-section>.notice-panel,
+.result-page>.notice-panel,
+.registration-page>.notice-panel {
+    margin-bottom: 1.5rem;
+}
+
+.result-page>.notice-panel+.result-primary-actions,
+.registration-page>.notice-panel+.registration-primary-actions {
+    margin-top: 1.5rem;
+}
+
 @media (max-width: 840px) {
     .team-detail-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2790,6 +2894,27 @@ tbody tr:last-child td {
     .team-action-dialog {
         padding: 1rem;
         box-shadow: var(--shadow-rigid-small);
+    }
+
+    .notice-panel,
+    .team-read-only-notice {
+        margin: 1rem 0 1.25rem;
+        padding: 0.9rem;
+    }
+
+    .notice-panel::before,
+    .team-read-only-notice::before {
+        margin-bottom: 0.55rem;
+    }
+
+    .notice-panel h2 {
+        font-size: 1.08rem;
+    }
+
+    .team-members-section>.team-table-panel,
+    .result-page>.race-table-panel,
+    .registration-page>.race-table-panel {
+        margin-top: 1.25rem;
     }
 }
 
@@ -3711,7 +3836,7 @@ tbody tr:last-child td {
     vertical-align: top;
 }
 
-.home-page > .home-standings-section {
+.home-page>.home-standings-section {
     width: 100%;
 }
 
