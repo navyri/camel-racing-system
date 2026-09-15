@@ -185,8 +185,8 @@ class RaceResultServiceTest {
         }
 
         @Test
-        @DisplayName("ranks finished results by time penalty recorded at and id")
-        void ranksFinishedResultsByTimePenaltyRecordedAtAndId() {
+        @DisplayName("ranks finished results by effective time recorded at and id")
+        void ranksFinishedResultsByEffectiveTimeRecordedAtAndId() {
                 UUID raceId = UUID.randomUUID();
 
                 User organizer = user("organizer");
@@ -283,8 +283,8 @@ class RaceResultServiceTest {
 
                 configureCompetitorStatistics(firstCompetitor.getId(), 1L, 0L, 1L);
                 configureCompetitorStatistics(secondCompetitor.getId(), 1L, 0L, 1L);
-                configureCompetitorStatistics(thirdCompetitor.getId(), 1L, 0L, 1L);
-                configureCompetitorStatistics(fourthCompetitor.getId(), 1L, 1L, 0L);
+                configureCompetitorStatistics(thirdCompetitor.getId(), 1L, 1L, 0L);
+                configureCompetitorStatistics(fourthCompetitor.getId(), 1L, 0L, 1L);
 
                 RaceResultResponse response = resultService.updateResult(
                                 first.getId(),
@@ -294,17 +294,96 @@ class RaceResultServiceTest {
                                                 ResultStatus.FINISHED,
                                                 "Recalculated"));
 
-                assertThat(response.finalPosition()).isEqualTo(SECOND_POSITION);
-                assertThat(fourth.getFinalPosition()).isEqualTo(WINNER_POSITION);
-                assertThat(first.getFinalPosition()).isEqualTo(SECOND_POSITION);
-                assertThat(second.getFinalPosition()).isEqualTo(THIRD_POSITION);
-                assertThat(third.getFinalPosition()).isEqualTo(FOURTH_POSITION);
+                assertThat(response.finalPosition()).isEqualTo(THIRD_POSITION);
+                assertThat(third.getFinalPosition()).isEqualTo(WINNER_POSITION);
+                assertThat(fourth.getFinalPosition()).isEqualTo(SECOND_POSITION);
+                assertThat(first.getFinalPosition()).isEqualTo(THIRD_POSITION);
+                assertThat(second.getFinalPosition()).isEqualTo(FOURTH_POSITION);
 
-                verify(resultRepository).saveAll(List.of(fourth, first, second, third));
+                verify(resultRepository).saveAll(List.of(third, fourth, first, second));
                 verify(competitorRepository).save(firstCompetitor);
                 verify(competitorRepository).save(secondCompetitor);
                 verify(competitorRepository).save(thirdCompetitor);
                 verify(competitorRepository).save(fourthCompetitor);
+        }
+
+        @Test
+        @DisplayName("ranks a lower completion time behind a higher effective time")
+        void ranksLowerCompletionTimeBehindHigherEffectiveTime() {
+                UUID raceId = UUID.randomUUID();
+
+                User organizer = user("organizer");
+                Race race = race(raceId, organizer);
+
+                Competitor alice = competitor(
+                                UUID.fromString("00000000-0000-0000-0000-000000000011"));
+                Competitor ladyMaria = competitor(
+                                UUID.fromString("00000000-0000-0000-0000-000000000012"));
+
+                RaceResult aliceResult = finishedResult(
+                                UUID.fromString("00000000-0000-0000-0000-000000000011"),
+                                registration(
+                                                UUID.randomUUID(),
+                                                race,
+                                                alice,
+                                                null,
+                                                RegistrationStatus.APPROVED,
+                                                1,
+                                                organizer),
+                                organizer,
+                                720,
+                                0,
+                                LocalDateTime.of(2026, 9, 15, 3, 49));
+
+                RaceResult ladyMariaResult = finishedResult(
+                                UUID.fromString("00000000-0000-0000-0000-000000000012"),
+                                registration(
+                                                UUID.randomUUID(),
+                                                race,
+                                                ladyMaria,
+                                                null,
+                                                RegistrationStatus.APPROVED,
+                                                2,
+                                                organizer),
+                                organizer,
+                                700,
+                                30,
+                                LocalDateTime.of(2026, 9, 15, 3, 51));
+
+                authenticateOrganizer();
+
+                when(resultRepository.findDetailedById(ladyMariaResult.getId()))
+                                .thenReturn(Optional.of(ladyMariaResult));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(resultRepository.save(ladyMariaResult)).thenReturn(ladyMariaResult);
+                when(resultRepository.findDetailedFinishedByRaceId(
+                                raceId,
+                                ResultStatus.FINISHED)).thenReturn(
+                                                new ArrayList<>(List.of(ladyMariaResult, aliceResult)));
+
+                when(competitorRepository.findById(alice.getId()))
+                                .thenReturn(Optional.of(alice));
+                when(competitorRepository.findById(ladyMaria.getId()))
+                                .thenReturn(Optional.of(ladyMaria));
+
+                configureCompetitorStatistics(alice.getId(), 1L, 1L, 0L);
+                configureCompetitorStatistics(ladyMaria.getId(), 1L, 0L, 1L);
+
+                RaceResultResponse response = resultService.updateResult(
+                                ladyMariaResult.getId(),
+                                new RaceResultUpdateRequest(
+                                                700L,
+                                                30L,
+                                                ResultStatus.FINISHED,
+                                                "Thirty second penalty applied after review"));
+
+                assertThat(response.finalPosition()).isEqualTo(SECOND_POSITION);
+                assertThat(aliceResult.getFinalPosition()).isEqualTo(WINNER_POSITION);
+                assertThat(ladyMariaResult.getFinalPosition()).isEqualTo(SECOND_POSITION);
+
+                verify(resultRepository).saveAll(List.of(aliceResult, ladyMariaResult));
+                verify(competitorRepository).save(alice);
+                verify(competitorRepository).save(ladyMaria);
         }
 
         @Test
@@ -729,11 +808,23 @@ class RaceResultServiceTest {
                                 eq(resultId.toString()),
                                 eq("Race result updated"),
                                 eq(
-                                                "finalPosition=2, completionTimeSeconds=220, penaltyTimeSeconds=0, "
-                                                                + "status=FINISHED, notes=Initial result"),
+                                                "raceId=" + raceId
+                                                                + ", registrationId=" + registrationId
+                                                                + ", finalPosition=2"
+                                                                + ", completionTimeSeconds=220"
+                                                                + ", penaltyTimeSeconds=0"
+                                                                + ", status=FINISHED"
+                                                                + ", notes=Initial result"
+                                                                + ", recordedByUsername=organizer"),
                                 eq(
-                                                "finalPosition=1, completionTimeSeconds=190, penaltyTimeSeconds=0, "
-                                                                + "status=FINISHED, notes=Corrected result"));
+                                                "raceId=" + raceId
+                                                                + ", registrationId=" + registrationId
+                                                                + ", finalPosition=1"
+                                                                + ", completionTimeSeconds=190"
+                                                                + ", penaltyTimeSeconds=0"
+                                                                + ", status=FINISHED"
+                                                                + ", notes=Corrected result"
+                                                                + ", recordedByUsername=organizer"));
         }
 
         @Test

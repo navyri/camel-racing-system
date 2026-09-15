@@ -27,19 +27,25 @@ public class CurrentUserService {
     public User getOrSynchronizeCurrentUser() {
         Jwt jwt = getCurrentJwt();
         String username = getUsername(jwt);
-        String keycloakSubject = getKeycloakSubject(jwt, username);
-        String email = getEmail(jwt, username);
+        EmailClaim emailClaim = getEmailClaim(jwt, username);
         String firstName = getFirstName(jwt, username);
         String lastName = getLastName(jwt);
+        String subject = jwt.getSubject();
 
-        return userRepository.findByKeycloakSubject(keycloakSubject)
-                .map(user -> updateUser(user, keycloakSubject, username, email, firstName, lastName))
-                .orElseGet(() -> findOrCreateUser(
-                        keycloakSubject,
-                        username,
-                        email,
-                        firstName,
-                        lastName));
+        if (hasText(subject)) {
+            return synchronizeUserWithSubject(
+                    subject,
+                    username,
+                    emailClaim.value(),
+                    firstName,
+                    lastName);
+        }
+
+        return synchronizeUserWithoutSubject(
+                username,
+                emailClaim,
+                firstName,
+                lastName);
     }
 
     private Jwt getCurrentJwt() {
@@ -52,16 +58,154 @@ public class CurrentUserService {
         return jwtAuthentication.getToken();
     }
 
-    private String getKeycloakSubject(Jwt jwt, String username) {
-        String subject = jwt.getSubject();
+    private User synchronizeUserWithSubject(
+            String keycloakSubject,
+            String username,
+            String email,
+            String firstName,
+            String lastName) {
+        return userRepository.findByKeycloakSubject(keycloakSubject)
+                .map(user -> updateUser(user, keycloakSubject, username, email, firstName, lastName))
+                .orElseGet(() -> findOrCreateUserWithSubject(
+                        keycloakSubject,
+                        username,
+                        email,
+                        firstName,
+                        lastName));
+    }
 
-        if (hasText(subject)) {
-            return subject;
+    private User synchronizeUserWithoutSubject(
+            String username,
+            EmailClaim emailClaim,
+            String firstName,
+            String lastName) {
+        if (emailClaim.providedByJwt()) {
+            return userRepository.findByEmail(emailClaim.value())
+                    .map(user -> reuseUserWithoutSubject(
+                            user,
+                            username,
+                            emailClaim,
+                            firstName,
+                            lastName))
+                    .orElseGet(() -> userRepository.findByUsername(username)
+                            .map(user -> reuseUserWithoutSubject(
+                                    user,
+                                    username,
+                                    emailClaim,
+                                    firstName,
+                                    lastName))
+                            .orElseGet(() -> createUser(
+                                    fallbackKeycloakSubject(username),
+                                    username,
+                                    emailClaim.value(),
+                                    firstName,
+                                    lastName)));
         }
 
+        return userRepository.findByUsername(username)
+                .map(user -> reuseUserWithoutSubject(
+                        user,
+                        username,
+                        emailClaim,
+                        firstName,
+                        lastName))
+                .orElseGet(() -> createUser(
+                        fallbackKeycloakSubject(username),
+                        username,
+                        emailClaim.value(),
+                        firstName,
+                        lastName));
+    }
+
+    private User findOrCreateUserWithSubject(
+            String keycloakSubject,
+            String username,
+            String email,
+            String firstName,
+            String lastName) {
+        return userRepository.findByEmail(email)
+                .map(user -> migrateLegacyUser(
+                        user,
+                        keycloakSubject,
+                        username,
+                        email,
+                        firstName,
+                        lastName))
+                .orElseGet(() -> userRepository.findByUsername(username)
+                        .map(user -> migrateLegacyUser(
+                                user,
+                                keycloakSubject,
+                                username,
+                                email,
+                                firstName,
+                                lastName))
+                        .orElseGet(() -> createUser(
+                                keycloakSubject,
+                                username,
+                                email,
+                                firstName,
+                                lastName)));
+    }
+
+    private User reuseUserWithoutSubject(
+            User user,
+            String username,
+            EmailClaim emailClaim,
+            String firstName,
+            String lastName) {
+        if (!user.getUsername().equals(username)) {
+            throw new ConflictException(
+                    "Local user identity conflicts with the authenticated user");
+        }
+
+        if (emailClaim.providedByJwt() && !user.getEmail().equals(emailClaim.value())) {
+            throw new ConflictException(
+                    "Local user identity conflicts with the authenticated user");
+        }
+
+        user.setFirstName(firstName);
+        user.setLastName(lastName);
+        user.setEnabled(true);
+
+        return userRepository.save(user);
+    }
+
+    private User migrateLegacyUser(
+            User user,
+            String keycloakSubject,
+            String username,
+            String email,
+            String firstName,
+            String lastName) {
+        if (!isLegacySubjectForUsername(user.getKeycloakSubject(), username)) {
+            throw new ConflictException(
+                    "Local user identity conflicts with the authenticated user");
+        }
+
+        return updateUser(user, keycloakSubject, username, email, firstName, lastName);
+    }
+
+    private String fallbackKeycloakSubject(String username) {
+        Jwt jwt = getCurrentJwt();
         String issuer = jwt.getIssuer() == null ? "keycloak" : jwt.getIssuer().toString();
 
         return issuer + "|" + username;
+    }
+
+    private boolean isLegacySubjectForUsername(
+            String storedKeycloakSubject,
+            String username) {
+        if (!hasText(storedKeycloakSubject) || !hasText(username)) {
+            return false;
+        }
+
+        int separatorIndex = storedKeycloakSubject.lastIndexOf("|");
+
+        if (separatorIndex <= 0 || separatorIndex == storedKeycloakSubject.length() - 1) {
+            return false;
+        }
+
+        return storedKeycloakSubject.substring(separatorIndex + 1).equals(username);
     }
 
     private String getUsername(Jwt jwt) {
@@ -92,14 +236,14 @@ public class CurrentUserService {
         throw new IllegalStateException("JWT does not contain a usable user identifier");
     }
 
-    private String getEmail(Jwt jwt, String username) {
+    private EmailClaim getEmailClaim(Jwt jwt, String username) {
         String email = jwt.getClaimAsString("email");
 
         if (hasText(email)) {
-            return email;
+            return new EmailClaim(email, true);
         }
 
-        return username + "@keycloak.local";
+        return new EmailClaim(username + "@keycloak.local", false);
     }
 
     private String getFirstName(Jwt jwt, String username) {
@@ -120,59 +264,6 @@ public class CurrentUserService {
         }
 
         return "Keycloak";
-    }
-
-    private User findOrCreateUser(
-            String keycloakSubject,
-            String username,
-            String email,
-            String firstName,
-            String lastName) {
-        return userRepository.findByEmail(email)
-                .map(user -> migrateLegacyUser(
-                        user,
-                        keycloakSubject,
-                        username,
-                        email,
-                        firstName,
-                        lastName))
-                .orElseGet(() -> createUser(
-                        keycloakSubject,
-                        username,
-                        email,
-                        firstName,
-                        lastName));
-    }
-
-    private User migrateLegacyUser(
-            User user,
-            String keycloakSubject,
-            String username,
-            String email,
-            String firstName,
-            String lastName) {
-        if (!isLegacySubjectForUsername(user.getKeycloakSubject(), username)) {
-            throw new ConflictException(
-                    "Local user identity conflicts with the authenticated user");
-        }
-
-        return updateUser(user, keycloakSubject, username, email, firstName, lastName);
-    }
-
-    private boolean isLegacySubjectForUsername(
-            String storedKeycloakSubject,
-            String username) {
-        if (!hasText(storedKeycloakSubject) || !hasText(username)) {
-            return false;
-        }
-
-        int separatorIndex = storedKeycloakSubject.lastIndexOf("|");
-
-        if (separatorIndex <= 0 || separatorIndex == storedKeycloakSubject.length() - 1) {
-            return false;
-        }
-
-        return storedKeycloakSubject.substring(separatorIndex + 1).equals(username);
     }
 
     private User createUser(
@@ -225,5 +316,8 @@ public class CurrentUserService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private record EmailClaim(String value, boolean providedByJwt) {
     }
 }

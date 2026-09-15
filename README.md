@@ -445,8 +445,6 @@ KEYCLOAK_ADMIN_USERNAME
 KEYCLOAK_ADMIN_PASSWORD
 ```
 
-No publiques el archivo `.env` real ni su contenido si contiene secretos o configuracion privada.
-
 ### Entorno del frontend para desarrollo local
 
 El contenedor frontend recibe la configuracion necesaria como build arguments desde `compose.yml`. Solo necesitas crear `frontend/.env` si deseas ejecutar Vite directamente fuera de Docker:

@@ -37,6 +37,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -81,27 +82,47 @@ class RaceServiceTest {
         }
 
         @Test
-        @DisplayName("creates draft race with synchronized organizer")
-        void createsDraftRaceWithSynchronizedOrganizer() {
+        @DisplayName("creates draft race with synchronized organizer and audit log")
+        void createsDraftRaceWithSynchronizedOrganizerAndAuditLog() {
+                UUID raceId = UUID.randomUUID();
                 User organizer = organizer();
 
                 when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
                 when(raceRepository.save(any(Race.class))).thenAnswer(invocation -> {
                         Race race = invocation.getArgument(0);
-                        race.setId(UUID.randomUUID());
+                        race.setId(raceId);
                         return race;
                 });
 
                 RaceResponse response = raceService.createRace(request());
 
-                assertThat(response.id()).isNotNull();
+                ArgumentCaptor<Race> captor = ArgumentCaptor.forClass(Race.class);
+                verify(raceRepository).save(captor.capture());
+
+                Race savedRace = captor.getValue();
+
+                assertThat(response.id()).isEqualTo(raceId);
                 assertThat(response.status()).isEqualTo(RaceStatus.DRAFT);
                 assertThat(response.organizerId()).isEqualTo(organizer.getId());
                 assertThat(response.createdAt()).isNotNull();
                 assertThat(response.updatedAt()).isNotNull();
+                assertThat(savedRace.getOrganizer()).isEqualTo(organizer);
 
                 verify(currentUserService).getOrSynchronizeCurrentUser();
-                verify(raceRepository).save(any(Race.class));
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_RACE_CREATED),
+                                eq("RACE"),
+                                eq(raceId.toString()),
+                                eq("Race created"),
+                                eq(null),
+                                eq("name=The Great Mixed Race, description=A mixed academic race, "
+                                                + "scheduledAt=" + savedRace.getScheduledAt()
+                                                + ", startLocation=EIA Start, finishLocation=EIA Finish, "
+                                                + "distanceMeters=1000.00, maxParticipants=10, raceType=MIXED, "
+                                                + "status=DRAFT, registrationDeadline="
+                                                + savedRace.getRegistrationDeadline()
+                                                + ", organizerUsername=organizer"));
         }
 
         @Test
@@ -130,7 +151,8 @@ class RaceServiceTest {
                                 "scheduledAt,asc");
 
                 assertThat(response.content()).hasSize(1);
-                assertThat(response.content().getFirst().name()).isEqualTo("The Great Mixed Race");
+                assertThat(response.content().getFirst().name())
+                                .isEqualTo("The Great Mixed Race");
                 assertThat(response.totalElements()).isEqualTo(1);
                 assertThat(response.first()).isTrue();
                 assertThat(response.last()).isTrue();
@@ -156,6 +178,61 @@ class RaceServiceTest {
         }
 
         @Test
+        @DisplayName("rejects update of in-progress race without persisting changes")
+        void rejectsUpdateOfInProgressRaceWithoutPersistingChanges() {
+                UUID id = UUID.randomUUID();
+                User organizer = organizer();
+                Race race = race(RaceStatus.IN_PROGRESS, organizer);
+                race.setId(id);
+
+                String originalName = race.getName();
+                String originalDescription = race.getDescription();
+                LocalDateTime originalScheduledAt = race.getScheduledAt();
+                String originalStartLocation = race.getStartLocation();
+                String originalFinishLocation = race.getFinishLocation();
+                BigDecimal originalDistanceMeters = race.getDistanceMeters();
+                int originalMaxParticipants = race.getMaxParticipants();
+                RaceType originalRaceType = race.getRaceType();
+                LocalDateTime originalRegistrationDeadline = race.getRegistrationDeadline();
+                LocalDateTime originalUpdatedAt = race.getUpdatedAt();
+
+                RaceRequest modifiedRequest = new RaceRequest(
+                                "Changed In Progress Race",
+                                "Changed description",
+                                originalScheduledAt.plusDays(1),
+                                "Changed Start",
+                                "Changed Finish",
+                                new BigDecimal("2500.00"),
+                                originalMaxParticipants + 1,
+                                RaceType.INDIVIDUAL,
+                                originalRegistrationDeadline.plusDays(1));
+
+                authenticateOrganizer();
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+
+                assertThatThrownBy(() -> raceService.updateRace(id, modifiedRequest))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage("In-progress or terminal races cannot be updated");
+
+                assertThat(race.getName()).isEqualTo(originalName);
+                assertThat(race.getDescription()).isEqualTo(originalDescription);
+                assertThat(race.getScheduledAt()).isEqualTo(originalScheduledAt);
+                assertThat(race.getStartLocation()).isEqualTo(originalStartLocation);
+                assertThat(race.getFinishLocation()).isEqualTo(originalFinishLocation);
+                assertThat(race.getDistanceMeters()).isEqualByComparingTo(
+                                originalDistanceMeters);
+                assertThat(race.getMaxParticipants()).isEqualTo(originalMaxParticipants);
+                assertThat(race.getRaceType()).isEqualTo(originalRaceType);
+                assertThat(race.getRegistrationDeadline())
+                                .isEqualTo(originalRegistrationDeadline);
+                assertThat(race.getUpdatedAt()).isEqualTo(originalUpdatedAt);
+
+                verify(raceRepository, never()).save(any(Race.class));
+                verifyNoAuditLog();
+        }
+
+        @Test
         @DisplayName("rejects organizer update for another organizer race")
         void rejectsOrganizerUpdateForAnotherOrganizerRace() {
                 UUID id = UUID.randomUUID();
@@ -166,10 +243,12 @@ class RaceServiceTest {
 
                 authenticateOrganizer();
                 when(raceRepository.findById(id)).thenReturn(Optional.of(race));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(anotherOrganizer);
+                when(currentUserService.getOrSynchronizeCurrentUser())
+                                .thenReturn(anotherOrganizer);
 
                 assertThatThrownBy(() -> raceService.updateRace(id, request()))
-                                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class)
+                                .isInstanceOf(
+                                                org.springframework.security.access.AccessDeniedException.class)
                                 .hasMessage("Race organizer can only manage own races");
 
                 verify(raceRepository, never()).save(any(Race.class));
@@ -186,7 +265,8 @@ class RaceServiceTest {
 
                 authenticateAdministrator();
                 when(raceRepository.findById(id)).thenReturn(Optional.of(race));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(administrator);
+                when(currentUserService.getOrSynchronizeCurrentUser())
+                                .thenReturn(administrator);
                 when(raceRepository.save(race)).thenReturn(race);
 
                 RaceResponse response = raceService.updateRace(id, request());
@@ -196,8 +276,8 @@ class RaceServiceTest {
         }
 
         @Test
-        @DisplayName("allows valid draft to open transition for owner organizer")
-        void allowsValidDraftToOpenTransitionForOwnerOrganizer() {
+        @DisplayName("allows valid draft to open transition and audits status change")
+        void allowsValidDraftToOpenTransitionAndAuditsStatusChange() {
                 UUID id = UUID.randomUUID();
                 User organizer = organizer();
                 Race race = race(RaceStatus.DRAFT, organizer);
@@ -214,6 +294,43 @@ class RaceServiceTest {
 
                 assertThat(response.status()).isEqualTo(RaceStatus.OPEN_FOR_REGISTRATION);
                 verify(raceRepository).save(race);
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_RACE_STATUS_CHANGED),
+                                eq("RACE"),
+                                eq(id.toString()),
+                                eq("Race status changed"),
+                                eq("status=DRAFT"),
+                                eq("status=OPEN_FOR_REGISTRATION"));
+        }
+
+        @Test
+        @DisplayName("allows reopening registration and audits status change")
+        void allowsReopeningRegistrationAndAuditsStatusChange() {
+                UUID id = UUID.randomUUID();
+                User organizer = organizer();
+                Race race = race(RaceStatus.CLOSED_FOR_REGISTRATION, organizer);
+                race.setId(id);
+
+                authenticateOrganizer();
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(raceRepository.save(race)).thenReturn(race);
+
+                RaceResponse response = raceService.updateRaceStatus(
+                                id,
+                                new RaceStatusRequest(RaceStatus.OPEN_FOR_REGISTRATION));
+
+                assertThat(response.status()).isEqualTo(RaceStatus.OPEN_FOR_REGISTRATION);
+                verify(raceRepository).save(race);
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_RACE_STATUS_CHANGED),
+                                eq("RACE"),
+                                eq(id.toString()),
+                                eq("Race status changed"),
+                                eq("status=CLOSED_FOR_REGISTRATION"),
+                                eq("status=OPEN_FOR_REGISTRATION"));
         }
 
         @Test
@@ -227,12 +344,14 @@ class RaceServiceTest {
 
                 authenticateOrganizer();
                 when(raceRepository.findById(id)).thenReturn(Optional.of(race));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(anotherOrganizer);
+                when(currentUserService.getOrSynchronizeCurrentUser())
+                                .thenReturn(anotherOrganizer);
 
                 assertThatThrownBy(() -> raceService.updateRaceStatus(
                                 id,
                                 new RaceStatusRequest(RaceStatus.OPEN_FOR_REGISTRATION)))
-                                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class)
+                                .isInstanceOf(
+                                                org.springframework.security.access.AccessDeniedException.class)
                                 .hasMessage("Race organizer can only manage own races");
 
                 verify(raceRepository, never()).save(any(Race.class));
@@ -249,7 +368,8 @@ class RaceServiceTest {
 
                 authenticateAdministrator();
                 when(raceRepository.findById(id)).thenReturn(Optional.of(race));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(administrator);
+                when(currentUserService.getOrSynchronizeCurrentUser())
+                                .thenReturn(administrator);
                 when(raceRepository.save(race)).thenReturn(race);
 
                 RaceResponse response = raceService.updateRaceStatus(
@@ -258,6 +378,14 @@ class RaceServiceTest {
 
                 assertThat(response.status()).isEqualTo(RaceStatus.OPEN_FOR_REGISTRATION);
                 verify(raceRepository).save(race);
+                verify(auditLogService).log(
+                                eq(administrator),
+                                eq(AuditLogService.ACTION_RACE_STATUS_CHANGED),
+                                eq("RACE"),
+                                eq(id.toString()),
+                                eq("Race status changed"),
+                                eq("status=DRAFT"),
+                                eq("status=OPEN_FOR_REGISTRATION"));
         }
 
         @Test
@@ -287,19 +415,12 @@ class RaceServiceTest {
                                 id,
                                 APPROVED_REGISTRATION_STATUSES);
                 verify(raceRepository, never()).save(any(Race.class));
-                verify(auditLogService, never()).log(
-                                any(User.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class));
+                verifyNoAuditLog();
         }
 
         @Test
-        @DisplayName("allows closing registration with two approved participants")
-        void allowsClosingRegistrationWithTwoApprovedParticipants() {
+        @DisplayName("allows closing registration with two approved participants and audits status change")
+        void allowsClosingRegistrationWithTwoApprovedParticipantsAndAuditsStatusChange() {
                 UUID id = UUID.randomUUID();
                 User organizer = organizer();
                 Race race = race(RaceStatus.OPEN_FOR_REGISTRATION, organizer);
@@ -322,6 +443,14 @@ class RaceServiceTest {
                                 id,
                                 APPROVED_REGISTRATION_STATUSES);
                 verify(raceRepository).save(race);
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_RACE_STATUS_CHANGED),
+                                eq("RACE"),
+                                eq(id.toString()),
+                                eq("Race status changed"),
+                                eq("status=OPEN_FOR_REGISTRATION"),
+                                eq("status=CLOSED_FOR_REGISTRATION"));
         }
 
         @Test
@@ -351,19 +480,12 @@ class RaceServiceTest {
                                 id,
                                 APPROVED_REGISTRATION_STATUSES);
                 verify(raceRepository, never()).save(any(Race.class));
-                verify(auditLogService, never()).log(
-                                any(User.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class));
+                verifyNoAuditLog();
         }
 
         @Test
-        @DisplayName("allows starting race with two approved participants")
-        void allowsStartingRaceWithTwoApprovedParticipants() {
+        @DisplayName("allows starting race with two approved participants and audits status change")
+        void allowsStartingRaceWithTwoApprovedParticipantsAndAuditsStatusChange() {
                 UUID id = UUID.randomUUID();
                 User organizer = organizer();
                 Race race = race(RaceStatus.CLOSED_FOR_REGISTRATION, organizer);
@@ -386,6 +508,14 @@ class RaceServiceTest {
                                 id,
                                 APPROVED_REGISTRATION_STATUSES);
                 verify(raceRepository).save(race);
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_RACE_STATUS_CHANGED),
+                                eq("RACE"),
+                                eq(id.toString()),
+                                eq("Race status changed"),
+                                eq("status=CLOSED_FOR_REGISTRATION"),
+                                eq("status=IN_PROGRESS"));
         }
 
         @Test
@@ -444,11 +574,16 @@ class RaceServiceTest {
                                 id,
                                 ResultStatus.FINISHED,
                                 WINNER_POSITION);
+                verify(registrationRepository, never()).countByRaceIdAndStatusWithoutResult(
+                                any(UUID.class),
+                                any(RegistrationStatus.class));
+                verify(raceRepository, never()).save(any(Race.class));
+                verifyNoAuditLog();
         }
 
         @Test
-        @DisplayName("allows in-progress completion with official winner")
-        void allowsInProgressCompletionWithOfficialWinner() {
+        @DisplayName("rejects in-progress completion when approved participants have no official result")
+        void rejectsInProgressCompletionWhenApprovedParticipantsHaveNoOfficialResult() {
                 UUID id = UUID.randomUUID();
                 User organizer = organizer();
                 Race race = race(RaceStatus.IN_PROGRESS, organizer);
@@ -461,6 +596,47 @@ class RaceServiceTest {
                                 id,
                                 ResultStatus.FINISHED,
                                 WINNER_POSITION)).thenReturn(true);
+                when(registrationRepository.countByRaceIdAndStatusWithoutResult(
+                                id,
+                                RegistrationStatus.APPROVED)).thenReturn(1L);
+
+                assertThatThrownBy(() -> raceService.updateRaceStatus(
+                                id,
+                                new RaceStatusRequest(RaceStatus.COMPLETED)))
+                                .isInstanceOf(ConflictException.class)
+                                .hasMessage(
+                                                "Race cannot be completed while approved participants have no official result");
+
+                assertThat(race.getStatus()).isEqualTo(RaceStatus.IN_PROGRESS);
+                verify(resultRepository).existsOfficialWinnerByRaceId(
+                                id,
+                                ResultStatus.FINISHED,
+                                WINNER_POSITION);
+                verify(registrationRepository).countByRaceIdAndStatusWithoutResult(
+                                id,
+                                RegistrationStatus.APPROVED);
+                verify(raceRepository, never()).save(any(Race.class));
+                verifyNoAuditLog();
+        }
+
+        @Test
+        @DisplayName("allows in-progress completion with official winner and completed registrations")
+        void allowsInProgressCompletionWithOfficialWinnerAndCompletedRegistrations() {
+                UUID id = UUID.randomUUID();
+                User organizer = organizer();
+                Race race = race(RaceStatus.IN_PROGRESS, organizer);
+                race.setId(id);
+
+                authenticateOrganizer();
+                when(raceRepository.findById(id)).thenReturn(Optional.of(race));
+                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(organizer);
+                when(resultRepository.existsOfficialWinnerByRaceId(
+                                id,
+                                ResultStatus.FINISHED,
+                                WINNER_POSITION)).thenReturn(true);
+                when(registrationRepository.countByRaceIdAndStatusWithoutResult(
+                                id,
+                                RegistrationStatus.APPROVED)).thenReturn(0L);
                 when(raceRepository.save(race)).thenReturn(race);
 
                 RaceResponse response = raceService.updateRaceStatus(
@@ -472,7 +648,18 @@ class RaceServiceTest {
                                 id,
                                 ResultStatus.FINISHED,
                                 WINNER_POSITION);
+                verify(registrationRepository).countByRaceIdAndStatusWithoutResult(
+                                id,
+                                RegistrationStatus.APPROVED);
                 verify(raceRepository).save(race);
+                verify(auditLogService).log(
+                                eq(organizer),
+                                eq(AuditLogService.ACTION_RACE_COMPLETED),
+                                eq("RACE"),
+                                eq(id.toString()),
+                                eq("Race completed"),
+                                eq("status=IN_PROGRESS"),
+                                eq("status=COMPLETED"));
         }
 
         @Test
@@ -535,22 +722,17 @@ class RaceServiceTest {
 
                 authenticateOrganizer();
                 when(raceRepository.findById(id)).thenReturn(Optional.of(race));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(anotherOrganizer);
+                when(currentUserService.getOrSynchronizeCurrentUser())
+                                .thenReturn(anotherOrganizer);
 
                 assertThatThrownBy(() -> raceService.cancelRace(id))
-                                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class)
+                                .isInstanceOf(
+                                                org.springframework.security.access.AccessDeniedException.class)
                                 .hasMessage("Race organizer can only manage own races");
 
                 assertThat(race.getStatus()).isEqualTo(RaceStatus.DRAFT);
                 verify(raceRepository, never()).save(any(Race.class));
-                verify(auditLogService, never()).log(
-                                any(User.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class),
-                                any(String.class));
+                verifyNoAuditLog();
         }
 
         @Test
@@ -564,7 +746,8 @@ class RaceServiceTest {
 
                 authenticateAdministrator();
                 when(raceRepository.findById(id)).thenReturn(Optional.of(race));
-                when(currentUserService.getOrSynchronizeCurrentUser()).thenReturn(administrator);
+                when(currentUserService.getOrSynchronizeCurrentUser())
+                                .thenReturn(administrator);
                 when(raceRepository.save(race)).thenReturn(race);
 
                 raceService.cancelRace(id);
@@ -625,8 +808,8 @@ class RaceServiceTest {
         }
 
         @Test
-        @DisplayName("rejects update of terminal race")
-        void rejectsUpdateOfTerminalRace() {
+        @DisplayName("rejects update of completed race")
+        void rejectsUpdateOfCompletedRace() {
                 UUID id = UUID.randomUUID();
                 User organizer = organizer();
                 Race race = race(RaceStatus.COMPLETED, organizer);
@@ -638,7 +821,9 @@ class RaceServiceTest {
 
                 assertThatThrownBy(() -> raceService.updateRace(id, request()))
                                 .isInstanceOf(ConflictException.class)
-                                .hasMessage("Terminal races cannot be updated");
+                                .hasMessage("In-progress or terminal races cannot be updated");
+
+                verify(raceRepository, never()).save(any(Race.class));
         }
 
         @Test
@@ -667,12 +852,24 @@ class RaceServiceTest {
                                 .hasMessageContaining("Race with id");
         }
 
+        private void verifyNoAuditLog() {
+                verify(auditLogService, never()).log(
+                                any(User.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class),
+                                any(String.class));
+        }
+
         private void authenticateOrganizer() {
                 SecurityContextHolder.getContext().setAuthentication(
                                 new UsernamePasswordAuthenticationToken(
                                                 "organizer",
                                                 "password",
-                                                List.of(new SimpleGrantedAuthority("ROLE_RACE_ORGANIZER"))));
+                                                List.of(new SimpleGrantedAuthority(
+                                                                "ROLE_RACE_ORGANIZER"))));
         }
 
         private void authenticateAdministrator() {
@@ -680,7 +877,8 @@ class RaceServiceTest {
                                 new UsernamePasswordAuthenticationToken(
                                                 "administrator",
                                                 "password",
-                                                List.of(new SimpleGrantedAuthority("ROLE_ADMINISTRATOR"))));
+                                                List.of(new SimpleGrantedAuthority(
+                                                                "ROLE_ADMINISTRATOR"))));
         }
 
         private RaceRequest request() {

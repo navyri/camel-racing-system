@@ -59,8 +59,7 @@ public class RaceResultService {
             ResultStatus.DISQUALIFIED);
 
     private static final Comparator<RaceResult> FINISHED_RESULT_COMPARATOR = Comparator
-            .comparing(RaceResult::getCompletionTime)
-            .thenComparing(RaceResult::getPenaltyTime)
+            .comparing(RaceResultService::getEffectiveTime)
             .thenComparing(RaceResult::getRecordedAt)
             .thenComparing(RaceResult::getId);
 
@@ -113,6 +112,15 @@ public class RaceResultService {
         affectedResults.add(savedResult);
 
         recalculateStatisticsForResults(affectedResults);
+
+        auditLogService.log(
+                currentUser,
+                AuditLogService.ACTION_RESULT_CREATED,
+                "RESULT",
+                savedResult.getId().toString(),
+                "Race result created",
+                null,
+                resultSnapshot(savedResult));
 
         return RaceResultMapper.toResponse(savedResult);
     }
@@ -250,6 +258,10 @@ public class RaceResultService {
         return finishedResults;
     }
 
+    private static Duration getEffectiveTime(RaceResult result) {
+        return result.getCompletionTime().plus(result.getPenaltyTime());
+    }
+
     private void recalculateStatisticsForResults(List<RaceResult> results) {
         Set<UUID> competitorIds = new HashSet<>();
         Set<UUID> teamIds = new HashSet<>();
@@ -327,7 +339,8 @@ public class RaceResultService {
     }
 
     private boolean hasAdministratorRole() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        Authentication authentication = SecurityContextHolder.getContext()
+                .getAuthentication();
 
         if (authentication == null) {
             return false;
@@ -375,11 +388,18 @@ public class RaceResultService {
     }
 
     private String resultSnapshot(RaceResult result) {
-        return "finalPosition=" + valueOf(result.getFinalPosition())
-                + ", completionTimeSeconds=" + durationSeconds(result.getCompletionTime())
-                + ", penaltyTimeSeconds=" + durationSeconds(result.getPenaltyTime())
+        RaceRegistration registration = result.getRegistration();
+
+        return "raceId=" + registration.getRace().getId()
+                + ", registrationId=" + registration.getId()
+                + ", finalPosition=" + valueOf(result.getFinalPosition())
+                + ", completionTimeSeconds="
+                + durationSeconds(result.getCompletionTime())
+                + ", penaltyTimeSeconds="
+                + durationSeconds(result.getPenaltyTime())
                 + ", status=" + result.getStatus()
-                + ", notes=" + valueOf(result.getNotes());
+                + ", notes=" + valueOf(result.getNotes())
+                + ", recordedByUsername=" + result.getRecordedBy().getUsername();
     }
 
     private String durationSeconds(Duration duration) {

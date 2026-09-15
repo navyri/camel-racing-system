@@ -60,7 +60,19 @@ public class CompetitorService {
         competitor.setDefeats(0);
         competitor.setCompletedRaces(0);
 
-        return CompetitorMapper.toResponse(competitorRepository.save(competitor));
+        Competitor savedCompetitor = competitorRepository.save(competitor);
+        User currentUser = currentUserService.getOrSynchronizeCurrentUser();
+
+        auditLogService.log(
+                currentUser,
+                AuditLogService.ACTION_COMPETITOR_CREATED,
+                "COMPETITOR",
+                savedCompetitor.getId().toString(),
+                "Competitor created",
+                null,
+                competitorSnapshot(savedCompetitor));
+
+        return CompetitorMapper.toResponse(savedCompetitor);
     }
 
     @Transactional(readOnly = true)

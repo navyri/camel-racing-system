@@ -16,37 +16,37 @@ import org.springframework.data.repository.query.Param;
 
 public interface RaceRepository extends JpaRepository<Race, UUID> {
 
-    List<Race> findByStatusAndScheduledAtAfterOrderByScheduledAtAsc(
-            RaceStatus status,
-            LocalDateTime scheduledAt);
+        List<Race> findByStatusAndScheduledAtAfterOrderByScheduledAtAsc(
+                        RaceStatus status,
+                        LocalDateTime scheduledAt);
 
-    @Query("""
-            select race
-            from Race race
-            where race.scheduledAt > :scheduledAt
-                and race.status not in :excludedStatuses
-            order by race.scheduledAt asc
-            """)
-    List<Race> findUpcomingRaces(
-            @Param("scheduledAt") LocalDateTime scheduledAt,
-            @Param("excludedStatuses") List<RaceStatus> excludedStatuses,
-            Pageable pageable);
+        @Query("""
+                        select race
+                        from Race race
+                        where race.scheduledAt > :scheduledAt
+                                and race.status not in :excludedStatuses
+                        order by race.scheduledAt asc
+                        """)
+        List<Race> findUpcomingRaces(
+                        @Param("scheduledAt") LocalDateTime scheduledAt,
+                        @Param("excludedStatuses") List<RaceStatus> excludedStatuses,
+                        Pageable pageable);
 
-    @Query("""
-            select race
-            from Race race
-            where (:status is null or race.status = :status)
-                and (:raceType is null or race.raceType = :raceType)
-                and (
-                    coalesce(:search, '') = ''
-                    or lower(race.name) like lower(concat('%', coalesce(:search, ''), '%'))
-                    or lower(race.startLocation) like lower(concat('%', coalesce(:search, ''), '%'))
-                    or lower(race.finishLocation) like lower(concat('%', coalesce(:search, ''), '%'))
-                )
-            """)
-    Page<Race> findAllByFilters(
-            @Param("status") RaceStatus status,
-            @Param("raceType") RaceType raceType,
-            @Param("search") String search,
-            Pageable pageable);
+        @Query("""
+                        select race
+                        from Race race
+                        where (:status is null or race.status = :status)
+                                and (:raceType is null or race.raceType = :raceType)
+                                and (
+                                coalesce(:search, '') = ''
+                                or lower(race.name) like lower(concat('%', coalesce(:search, ''), '%'))
+                                or lower(race.startLocation) like lower(concat('%', coalesce(:search, ''), '%'))
+                                or lower(race.finishLocation) like lower(concat('%', coalesce(:search, ''), '%'))
+                                )
+                        """)
+        Page<Race> findAllByFilters(
+                        @Param("status") RaceStatus status,
+                        @Param("raceType") RaceType raceType,
+                        @Param("search") String search,
+                        Pageable pageable);
 }

@@ -137,15 +137,44 @@ describe('registrationTypes', () => {
         expect(formatRegistrationStatus('CANCELLED')).toBe('Cancelled')
     })
 
-    it('allows only valid registration actions by status', () => {
+    it('allows approval and rejection only for pending registrations', () => {
         expect(canApproveRegistration('PENDING')).toBe(true)
         expect(canApproveRegistration('APPROVED')).toBe(false)
         expect(canRejectRegistration('PENDING')).toBe(true)
         expect(canRejectRegistration('REJECTED')).toBe(false)
-        expect(canCancelRegistration('PENDING')).toBe(true)
-        expect(canCancelRegistration('APPROVED')).toBe(true)
-        expect(canCancelRegistration('REJECTED')).toBe(false)
-        expect(canCancelRegistration('CANCELLED')).toBe(false)
+    })
+
+    it('allows cancellation only for pending or approved registrations while registration is open', () => {
+        expect(
+            canCancelRegistration('PENDING', 'OPEN_FOR_REGISTRATION'),
+        ).toBe(true)
+        expect(
+            canCancelRegistration('APPROVED', 'OPEN_FOR_REGISTRATION'),
+        ).toBe(true)
+        expect(
+            canCancelRegistration('REJECTED', 'OPEN_FOR_REGISTRATION'),
+        ).toBe(false)
+        expect(
+            canCancelRegistration('CANCELLED', 'OPEN_FOR_REGISTRATION'),
+        ).toBe(false)
+    })
+
+    it('blocks cancellation when registration is not open', () => {
+        expect(
+            canCancelRegistration('PENDING', 'DRAFT'),
+        ).toBe(false)
+        expect(
+            canCancelRegistration('APPROVED', 'CLOSED_FOR_REGISTRATION'),
+        ).toBe(false)
+        expect(
+            canCancelRegistration('APPROVED', 'IN_PROGRESS'),
+        ).toBe(false)
+        expect(
+            canCancelRegistration('APPROVED', 'COMPLETED'),
+        ).toBe(false)
+        expect(
+            canCancelRegistration('APPROVED', 'CANCELLED'),
+        ).toBe(false)
     })
 
     it('allows individual registrations only for compatible open races', () => {

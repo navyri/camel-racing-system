@@ -110,6 +110,36 @@ describe('RaceFormPage', () => {
         expect(screen.queryByText('Access denied')).not.toBeInTheDocument()
     })
 
+    it('shows locked state for in-progress race opened through direct edit url', async () => {
+        getRaceById.mockResolvedValueOnce(
+            createRace({
+                status: 'IN_PROGRESS',
+            }),
+        )
+
+        renderRaceFormPage(
+            ['ADMINISTRATOR'],
+            '/races/2f173f4a-2059-4f42-a591-394183aec8f0/edit',
+            'administrator',
+        )
+
+        expect(
+            await screen.findByRole('heading', {
+                name: 'Race cannot be edited',
+            }),
+        ).toBeInTheDocument()
+        expect(
+            screen.getByText(
+                'In-progress, completed and cancelled races are locked records and cannot be updated.',
+            ),
+        ).toBeInTheDocument()
+        expect(screen.queryByLabelText('Race name')).not.toBeInTheDocument()
+        expect(
+            screen.getByRole('button', { name: 'Return to race detail' }),
+        ).toBeInTheDocument()
+        expect(updateRace).not.toHaveBeenCalled()
+    })
+
     it('renders edit form for administrator on another organizer race', async () => {
         getRaceById.mockResolvedValueOnce(createRace())
 
